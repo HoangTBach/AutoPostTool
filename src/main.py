@@ -1,7 +1,11 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import (
+    QFont,
+    QFontDatabase,
+    QIcon,
+)
 from PySide6.QtWidgets import QApplication
 
 from src.app import App
@@ -15,20 +19,25 @@ from src.themes.font import (
 def main():
     app = QApplication(sys.argv)
 
-    # Font
+    # ----- Font -----
+    font_dir = Path(__file__).resolve().parent / "assets" / "fonts"
+
+    for font_file in font_dir.glob("*.ttf"):
+        QFontDatabase.addApplicationFont(str(font_file))
+
     font = QFont(FONT_FAMILY)
     font.setPixelSize(FONT_SIZE_14)
     app.setFont(font)
 
-    # App Name
-    app.setApplicationName(APP_NAME)
-    app.setOrganizationName(APP_NAME)
-
-    # Logo
+    # ----- Logo -----
     logo_path = Path(__file__).resolve().parent / "assets" / "images" / "logo.png"
 
     if logo_path.exists():
         app.setWindowIcon(QIcon(str(logo_path)))
+
+    # ----- App -----
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(APP_NAME)
 
     window = App()
     window.show()
