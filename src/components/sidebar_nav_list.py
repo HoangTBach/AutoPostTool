@@ -11,7 +11,7 @@ from src.configs.menu import MENU_ITEMS
 class NavList(QWidget):
 
     # ----- Settings -----
-    SPACING = 12
+    SPACING = 4
 
     # ----- Navigation Signal -----
     page_selected = Signal(str)

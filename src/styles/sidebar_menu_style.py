@@ -1,7 +1,7 @@
 from src.themes.color import MENU_TEXT
 
 from src.themes.font import (
-    FONT_WEIGHT_SEMIBOLD,
+    FONT_WEIGHT_MEDIUM,
 )
 
 SIDEBAR_MENU_STYLE = f"""
@@ -15,6 +15,6 @@ QPushButton#menuButton {{
 QLabel#menuButtonText {{
     background-color: transparent;
     color: {MENU_TEXT};
-    font-weight: {FONT_WEIGHT_SEMIBOLD};
+    font-weight: {FONT_WEIGHT_MEDIUM};
 }}
 """
