@@ -4,8 +4,8 @@ from src.themes.color import (
     TEXT_COLOR,
 )
 from src.themes.font import (
-    FONT_SIZE_12,
-    FONT_WEIGHT_MEDIUM,
+    FONT_SIZE_13,
+    FONT_WEIGHT_REGULAR,
 )
 
 INPUT_STYLE = f"""
@@ -21,8 +21,8 @@ QLineEdit#input {{
     min-height: 30px;
     max-height: 30px;
 
-    font-size: {FONT_SIZE_12}px;
-    font-weight: {FONT_WEIGHT_MEDIUM};
+    font-size: {FONT_SIZE_13}px;
+    font-weight: {FONT_WEIGHT_REGULAR};
 }}
 
 QLineEdit#input[editable="true"] {{

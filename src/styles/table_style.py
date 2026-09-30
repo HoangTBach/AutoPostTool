@@ -10,10 +10,13 @@ from src.themes.color import (
     TABLE_INPUT_BORDER,
     TEXT_COLOR,
 )
+
 from src.themes.font import (
     FONT_SIZE_10,
     FONT_SIZE_12,
+    FONT_SIZE_13,
     FONT_WEIGHT_MEDIUM,
+    FONT_WEIGHT_REGULAR,
     FONT_WEIGHT_SEMIBOLD,
 )
 
@@ -30,15 +33,15 @@ QWidget#table {{
 
 QWidget#tableHeader {{
     background-color: {TABLE_HEADER_BG};
-    border: none;
-    border-left: 1px solid {CARD_BORDER};
-    border-right: 1px solid {CARD_BORDER};
+    border: 1px solid {CARD_BORDER};
+    border-bottom: none;
 }}
 
 QLabel#tableHeaderCell {{
     background-color: transparent;
-    color: {CARD_TITLE};
+    color: {TEXT_COLOR};
     border: none;
+
     font-size: {FONT_SIZE_10}px;
     font-weight: {FONT_WEIGHT_SEMIBOLD};
 }}
@@ -81,9 +84,17 @@ QWidget#tableRow {{
 
 QLabel#tableText {{
     background-color: transparent;
-    color: {TEXT_COLOR};
     border: none;
-    font-size: {FONT_SIZE_12}px;
+    font-size: {FONT_SIZE_13}px;
+}}
+
+QLabel#tableText[column="no"] {{
+    color: {CARD_TITLE};
+    font-weight: {FONT_WEIGHT_MEDIUM};
+}}
+
+QLabel#tableText[column="page"] {{
+    color: {TEXT_COLOR};
     font-weight: {FONT_WEIGHT_MEDIUM};
 }}
 
@@ -93,6 +104,7 @@ QLabel#tableText {{
 QLabel#tableBox {{
     background-color: {TABLE_INPUT_BG};
     color: {TEXT_COLOR};
+
     border: 1px solid {TABLE_INPUT_BORDER};
     border-radius: 6px;
 
@@ -101,8 +113,8 @@ QLabel#tableBox {{
 
     padding: 0px 10px;
 
-    font-size: {FONT_SIZE_12}px;
-    font-weight: {FONT_WEIGHT_MEDIUM};
+    font-size: {FONT_SIZE_13}px;
+    font-weight: {FONT_WEIGHT_REGULAR};
 }}
 
 
@@ -117,6 +129,7 @@ QLabel#tableListItem {{
     background-color: transparent;
     color: {TEXT_COLOR};
     border: none;
+
     font-size: {FONT_SIZE_12}px;
     font-weight: {FONT_WEIGHT_MEDIUM};
 }}
@@ -127,6 +140,7 @@ QLabel#tableListItem {{
 QLabel#tableStatus {{
     background-color: transparent;
     border: none;
+
     font-size: {FONT_SIZE_12}px;
     font-weight: {FONT_WEIGHT_MEDIUM};
 }}

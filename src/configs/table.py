@@ -46,7 +46,7 @@ PAGE_TABLE_COLUMNS = [
     {
         "key": "status",
         "title": "Status",
-        "width": 70,
+        "width": 80,
         "resize": "fixed",
         "align": Qt.AlignmentFlag.AlignRight,
         "type": "status",

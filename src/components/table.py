@@ -139,10 +139,7 @@ class Table(QWidget):
         # ----- Header -----
         self.header = QWidget()
         self.header.setObjectName("tableHeader")
-        self.header.setAttribute(
-            Qt.WidgetAttribute.WA_StyledBackground,
-            True,
-        )
+        self.header.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self.header_layout = QGridLayout(self.header)
 
@@ -162,12 +159,7 @@ class Table(QWidget):
 
         self.body_layout = QVBoxLayout(self.body)
 
-        self.body_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
 
         self.body_layout.setSpacing(0)
 
@@ -196,60 +188,28 @@ class Table(QWidget):
         # ----- Layout -----
         layout = QVBoxLayout(self)
 
-        layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.setSpacing(0)
 
         layout.addWidget(self.header)
 
-        layout.addWidget(
-            self.scroll_area,
-            1,
-        )
+        layout.addWidget(self.scroll_area, 1)
 
     # ----- Setup Grid Columns -----
-    def setup_grid_columns(
-        self,
-        layout: QGridLayout,
-    ):
+    def setup_grid_columns(self, layout: QGridLayout):
         for index, column in enumerate(self.columns):
-            resize = column.get(
-                "resize",
-                "stretch",
-            )
+            resize = column.get("resize", "stretch")
 
             if resize == "fixed":
-                layout.setColumnMinimumWidth(
-                    index,
-                    column.get(
-                        "width",
-                        100,
-                    ),
-                )
+                layout.setColumnMinimumWidth(index, column.get("width", 100))
 
-                layout.setColumnStretch(
-                    index,
-                    0,
-                )
+                layout.setColumnStretch(index, 0)
 
             else:
-                layout.setColumnMinimumWidth(
-                    index,
-                    0,
-                )
+                layout.setColumnMinimumWidth(index, 0)
 
-                layout.setColumnStretch(
-                    index,
-                    column.get(
-                        "stretch",
-                        1,
-                    ),
-                )
+                layout.setColumnStretch(index, column.get("stretch", 1))
 
     # ----- Header -----
     def setup_header(self):
@@ -260,16 +220,9 @@ class Table(QWidget):
 
             label.setAlignment(self.get_alignment(column))
 
-            self.setup_column_widget(
-                label,
-                column,
-            )
+            self.setup_column_widget(label, column)
 
-            self.header_layout.addWidget(
-                label,
-                0,
-                index,
-            )
+            self.header_layout.addWidget(label, 0, index)
 
     # ----- Set Data -----
     def set_data(
@@ -299,10 +252,7 @@ class Table(QWidget):
         row = QWidget()
         row.setObjectName("tableRow")
 
-        row.setAttribute(
-            Qt.WidgetAttribute.WA_StyledBackground,
-            True,
-        )
+        row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         row.setMinimumHeight(self.get_row_height(data))
 
@@ -317,124 +267,69 @@ class Table(QWidget):
         self.setup_grid_columns(row_layout)
 
         for index, column in enumerate(self.columns):
-            value = self.get_cell_value(
-                data,
-                column,
-            )
+            value = self.get_cell_value(data, column)
 
-            cell = self.create_cell(
-                value,
-                column,
-            )
+            cell = self.create_cell(value, column)
 
-            self.setup_column_widget(
-                cell,
-                column,
-            )
+            self.setup_column_widget(cell, column)
 
-            row_layout.addWidget(
-                cell,
-                0,
-                index,
-            )
+            row_layout.addWidget(cell, 0, index)
 
         return row
 
     # ----- Create Cell -----
-    def create_cell(
-        self,
-        value,
-        column: dict,
-    ):
-        cell_type = column.get(
-            "type",
-            "text",
-        )
+    def create_cell(self, value, column: dict):
+        cell_type = column.get("type", "text")
 
         if cell_type == "input":
-            return self.create_input(
-                str(value),
-                column,
-            )
+            return self.create_input(str(value), column)
 
         if cell_type == "status":
-            return self.create_status(
-                str(value),
-                column,
-            )
+            return self.create_status(str(value), column)
 
         if cell_type == "list":
-            return self.create_list(
-                value,
-                column,
-            )
+            return self.create_list(value, column)
 
         if cell_type == "status_list":
-            return self.create_status_list(
-                value,
-                column,
-            )
+            return self.create_status_list(value, column)
 
-        return self.create_text(
-            str(value),
-            column,
-        )
+        return self.create_text(str(value), column)
 
     # ----- Text -----
-    def create_text(
-        self,
-        text: str,
-        column: dict,
-    ):
+    def create_text(self, text: str, column: dict):
         label = ElideLabel(text)
 
         label.setObjectName("tableText")
+
+        label.setProperty("column", column.get("key", ""))
 
         label.setAlignment(self.get_alignment(column))
 
         return label
 
     # ----- Input -----
-    def create_input(
-        self,
-        text: str,
-        column: dict,
-    ):
+    def create_input(self, text: str, column: dict):
         input_field = Input(
             text=text,
-            editable=column.get(
-                "editable",
-                False,
-            ),
+            editable=column.get("editable", False),
         )
 
         return input_field
 
     # ----- Status -----
-    def create_status(
-        self,
-        status: str,
-        column: dict,
-    ):
+    def create_status(self, status: str, column: dict):
         label = QLabel(status)
 
         label.setObjectName("tableStatus")
 
-        label.setProperty(
-            "status",
-            status.lower(),
-        )
+        label.setProperty("status", status.lower())
 
         label.setAlignment(self.get_alignment(column))
 
         return label
 
     # ----- List -----
-    def create_list(
-        self,
-        values,
-        column: dict,
-    ):
+    def create_list(self, values, column: dict):
         if not isinstance(values, list):
             values = [values]
 
@@ -443,12 +338,7 @@ class Table(QWidget):
 
         layout = QVBoxLayout(container)
 
-        layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.setSpacing(self.LIST_SPACING)
 
@@ -466,11 +356,7 @@ class Table(QWidget):
         return container
 
     # ----- Status List -----
-    def create_status_list(
-        self,
-        values,
-        column: dict,
-    ):
+    def create_status_list(self, values, column: dict):
         if not isinstance(values, list):
             values = [values]
 
@@ -479,12 +365,7 @@ class Table(QWidget):
 
         layout = QVBoxLayout(container)
 
-        layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.setSpacing(self.LIST_SPACING)
 
@@ -495,10 +376,7 @@ class Table(QWidget):
 
             label.setObjectName("tableStatus")
 
-            label.setProperty(
-                "status",
-                status.lower(),
-            )
+            label.setProperty("status", status.lower())
 
             label.setAlignment(self.get_alignment(column))
 
@@ -517,38 +395,23 @@ class Table(QWidget):
         source = column.get("source")
 
         if source:
-            values = row.get(
-                source,
-                [],
-            )
+            values = row.get(source, [])
 
             field = column.get("field")
 
             return [item.get(field, "") for item in values]
 
-        return row.get(
-            column.get("key"),
-            "",
-        )
+        return row.get(column.get("key"), "")
 
     # ----- Row Height -----
-    def get_row_height(
-        self,
-        row: dict,
-    ):
+    def get_row_height(self, row: dict):
         max_items = 1
 
         for column in self.columns:
-            value = self.get_cell_value(
-                row,
-                column,
-            )
+            value = self.get_cell_value(row, column)
 
             if isinstance(value, list):
-                max_items = max(
-                    max_items,
-                    len(value),
-                )
+                max_items = max(max_items, len(value))
 
         if max_items <= 1:
             return self.ROW_HEIGHT
@@ -559,40 +422,22 @@ class Table(QWidget):
         )
 
     # ----- Column Size -----
-    def setup_column_widget(
-        self,
-        widget: QWidget,
-        column: dict,
-    ):
-        resize = column.get(
-            "resize",
-            "stretch",
-        )
+    def setup_column_widget(self, widget: QWidget, column: dict):
+        resize = column.get("resize", "stretch")
 
         # ----- Fixed Column -----
         if resize == "fixed":
-            widget.setFixedWidth(
-                column.get(
-                    "width",
-                    100,
-                )
-            )
+            widget.setFixedWidth(column.get("width", 100))
 
             return
 
         # ----- Stretch Column -----
         widget.setMinimumWidth(0)
 
-        if isinstance(
-            widget,
-            ElideLabel,
-        ):
+        if isinstance(widget, ElideLabel):
             return
 
-        widget.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred,
-        )
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
     # ----- Alignment -----
     def get_alignment(
@@ -600,9 +445,6 @@ class Table(QWidget):
         column: dict,
     ):
         return (
-            column.get(
-                "align",
-                Qt.AlignmentFlag.AlignLeft,
-            )
+            column.get("align", Qt.AlignmentFlag.AlignLeft)
             | Qt.AlignmentFlag.AlignVCenter
         )
