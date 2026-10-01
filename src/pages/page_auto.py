@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -104,6 +104,7 @@ class PageAutoPage(QWidget):
         # ----- Default State -----
         self.run_button.hide()
         self.stop_button.hide()
+        self.opening_download = False
 
         # ----- Button Events -----
         self.import_button.clicked.connect(self.import_excel)
@@ -368,8 +369,13 @@ class PageAutoPage(QWidget):
         self.run_button.show()
         self.stop_button.hide()
 
-    # ----- Open Excel Directory -----
+    # ----- Open Excel -----
     def open_excel(self):
+        if self.opening_download:
+            return
+
+        self.opening_download = True
+
         try:
             open_directory(DOWNLOAD_DIR)
 
@@ -379,6 +385,23 @@ class PageAutoPage(QWidget):
                 "Folder Not Found",
                 str(error),
             )
+
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Open Folder Error",
+                str(error),
+            )
+
+        finally:
+            QTimer.singleShot(
+                1000,
+                self.unlock_open_excel,
+            )
+
+    # ----- Unlock Open Excel -----
+    def unlock_open_excel(self):
+        self.opening_download = False
 
     # ----- Start Run -----
     def start_run(self):

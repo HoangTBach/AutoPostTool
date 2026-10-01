@@ -1,0 +1,4 @@
+{
+    "local_api": "127.0.0.1:50325",
+    "auto_reconnect": false
+}
