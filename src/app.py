@@ -29,5 +29,5 @@ class App(QMainWindow):
         )
         self.setStyleSheet(APP_STYLE)
 
-        # Set Layout
+        # ----- Set Layout -----
         self.setCentralWidget(MainLayout())

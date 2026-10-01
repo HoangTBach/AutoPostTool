@@ -1,7 +1,10 @@
 from pathlib import Path
 
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -13,14 +16,25 @@ from src.components.card import (
 )
 from src.components.page_header import PageHeader
 from src.components.table import Table
-from src.configs.table import PAGE_TABLE_COLUMNS
 
+from src.themes.color import CARD_DESCRIPTION
+from src.themes.font import (
+    FONT_SIZE_10,
+    FONT_WEIGHT_REGULAR,
+)
+
+from src.configs.table import PAGE_TABLE_COLUMNS
+from src.configs.path import DOWNLOAD_DIR
+from src.features.page_posting.excel import load_page_rows
+from src.utils.file import open_directory
+
+# ----- Paths -----
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 
 class PageAutoPage(QWidget):
 
-    # ----- Setting -----
+    # ----- Settings -----
     MARGIN = (32, 32, 32, 32)
     SPACING = 24
 
@@ -30,6 +44,11 @@ class PageAutoPage(QWidget):
 
     def __init__(self):
         super().__init__()
+
+        # ----- Data -----
+        self.page_rows = []
+
+        page_stats = self.get_page_stats(self.page_rows)
 
         # ----- Header -----
         header = PageHeader(
@@ -66,22 +85,41 @@ class PageAutoPage(QWidget):
             color="red",
         )
 
+        # ----- Table Summary -----
+        self.summary_label = QLabel()
+
+        self.summary_label.setObjectName("tableSummary")
+
+        self.summary_label.setStyleSheet(f"""
+            QLabel#tableSummary {{
+                color: {CARD_DESCRIPTION};
+                font-size: {FONT_SIZE_10}px;
+                font-weight: {FONT_WEIGHT_REGULAR};
+                background-color: transparent;
+            }}
+            """)
+
+        self.update_summary(self.page_rows)
+
         # ----- Default State -----
+        self.run_button.hide()
         self.stop_button.hide()
+        self.opening_download = False
 
         # ----- Button Events -----
+        self.import_button.clicked.connect(self.import_excel)
+
+        self.open_button.clicked.connect(self.open_excel)
+
         self.run_button.clicked.connect(self.start_run)
 
         self.stop_button.clicked.connect(self.stop_run)
 
         # ----- Action Layout -----
         action_layout = QHBoxLayout()
-        action_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+
+        action_layout.setContentsMargins(0, 0, 0, 0)
+
         action_layout.setSpacing(self.ACTION_SPACING)
 
         action_layout.addWidget(self.import_button)
@@ -90,6 +128,8 @@ class PageAutoPage(QWidget):
 
         action_layout.addStretch()
 
+        action_layout.addWidget(self.summary_label)
+
         action_layout.addWidget(self.run_button)
 
         action_layout.addWidget(self.stop_button)
@@ -97,31 +137,31 @@ class PageAutoPage(QWidget):
         # ----- Stat Cards -----
         self.active_pages_card = StatCard(
             title="Active pages",
-            value="18 / 20",
-            description="2 pages need review",
+            value=(f"{page_stats['active_pages']} / " f"{page_stats['page_targets']}"),
+            description=self.get_review_description(page_stats["review_pages"]),
             icon=ICON_DIR / "file-text.svg",
             color="blue",
         )
 
         self.published_card = StatCard(
             title="Posts published",
-            value="42",
-            description="Published today",
+            value=str(page_stats["published"]),
+            description="Published posts",
             icon=ICON_DIR / "earth.svg",
             color="green",
         )
 
         self.automation_card = StatCard(
             title="Next automation",
-            value="10:30",
-            description="Starts in 2 min",
+            value="--:--",
+            description="Not scheduled",
             icon=ICON_DIR / "clock-3.svg",
             color="purple",
         )
 
         self.failed_card = StatCard(
             title="Failed posts",
-            value="1",
+            value=str(page_stats["failed"]),
             description="Needs attention",
             icon=ICON_DIR / "triangle-alert.svg",
             color="red",
@@ -129,33 +169,18 @@ class PageAutoPage(QWidget):
 
         # ----- Stat Layout -----
         stat_layout = QHBoxLayout()
-        stat_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+
+        stat_layout.setContentsMargins(0, 0, 0, 0)
+
         stat_layout.setSpacing(self.STAT_SPACING)
 
-        stat_layout.addWidget(
-            self.active_pages_card,
-            1,
-        )
+        stat_layout.addWidget(self.active_pages_card, 1)
 
-        stat_layout.addWidget(
-            self.published_card,
-            1,
-        )
+        stat_layout.addWidget(self.published_card, 1)
 
-        stat_layout.addWidget(
-            self.automation_card,
-            1,
-        )
+        stat_layout.addWidget(self.automation_card, 1)
 
-        stat_layout.addWidget(
-            self.failed_card,
-            1,
-        )
+        stat_layout.addWidget(self.failed_card, 1)
 
         # ----- Page List Card -----
         self.table_card = TableCard(title="Page List")
@@ -165,183 +190,14 @@ class PageAutoPage(QWidget):
 
         self.table_card.set_table(self.table)
 
-        # ----- Demo Data -----
-        page_rows = [
-            {
-                "no": 1,
-                "page": "Mark Diaz",
-                "caption": "Ra mắt tính năng mới! Lên lịch đăng tự động.",
-                "image": "https://example.com/launch-01.jpg",
-                "comment": "Trải nghiệm ngay!",
-                "status": "Done",
-            },
-            {
-                "no": 2,
-                "page": "Kamryn Martinez",
-                "caption": "Ưu đãi mới dành cho khách hàng trong tuần này.",
-                "image": "https://example.com/launch-02.jpg",
-                "comment": "Xem chi tiết ngay!",
-                "status": "Done",
-            },
-            {
-                "no": 3,
-                "page": "Avery Brooks",
-                "caption": "Ra mắt chiến dịch mới với nhiều nội dung hấp dẫn.",
-                "image": "https://example.com/launch-03.jpg",
-                "comment": "Đừng bỏ lỡ!",
-                "status": "Error",
-            },
-            {
-                "no": 4,
-                "page": "Elena Fisher",
-                "caption": "Bài đăng đang được xử lý và chuẩn bị xuất bản.",
-                "image": "https://example.com/launch-04.jpg",
-                "comment": "Theo dõi để cập nhật.",
-                "status": "Running",
-            },
-            {
-                "no": 5,
-                "page": "Noah Kim",
-                "caption": "Nội dung đã sẵn sàng và đang chờ đến lượt đăng.",
-                "image": "https://example.com/launch-05.jpg",
-                "comment": "Xem thêm thông tin.",
-                "status": "Queued",
-            },
-            {
-                "no": 6,
-                "page": "Logan Price",
-                "caption": "Khám phá những cập nhật mới nhất của chúng tôi.",
-                "image": "https://example.com/launch-06.jpg",
-                "comment": "Tìm hiểu ngay!",
-                "status": "Queued",
-            },
-            {
-                "no": 7,
-                "page": "Ruby Singh",
-                "caption": "Một nội dung mới đang được lên lịch tự động.",
-                "image": "https://example.com/launch-07.jpg",
-                "comment": "Theo dõi ngay!",
-                "status": "Queued",
-            },
-            {
-                "no": 8,
-                "page": "Caleb Turner",
-                "caption": "Bài viết mới dành cho cộng đồng của chúng tôi.",
-                "image": "https://example.com/launch-08.jpg",
-                "comment": "Tham gia cùng chúng tôi!",
-                "status": "Queued",
-            },
-            {
-                "no": 9,
-                "page": "Mia Carter",
-                "caption": "Cập nhật sản phẩm và những tính năng mới nhất.",
-                "image": "https://example.com/launch-09.jpg",
-                "comment": "Khám phá ngay!",
-                "status": "Queued",
-            },
-            {
-                "no": 10,
-                "page": "Ethan Walker",
-                "caption": "Nội dung mới đã được chuẩn bị cho chiến dịch hôm nay.",
-                "image": "https://example.com/launch-10.jpg",
-                "comment": "Đọc thêm ngay!",
-                "status": "Done",
-            },
-            {
-                "no": 11,
-                "page": "Olivia Bennett",
-                "caption": "Chúng tôi vừa cập nhật thêm nhiều tính năng mới.",
-                "image": "https://example.com/launch-11.jpg",
-                "comment": "Khám phá chi tiết.",
-                "status": "Running",
-            },
-            {
-                "no": 12,
-                "page": "Lucas Scott",
-                "caption": "Bài đăng mới đã được thêm vào lịch tự động.",
-                "image": "https://example.com/launch-12.jpg",
-                "comment": "Theo dõi bài viết.",
-                "status": "Queued",
-            },
-            {
-                "no": 13,
-                "page": "Sophia Adams",
-                "caption": "Thông tin mới nhất dành cho cộng đồng hôm nay.",
-                "image": "https://example.com/launch-13.jpg",
-                "comment": "Xem ngay!",
-                "status": "Done",
-            },
-            {
-                "no": 14,
-                "page": "Jackson Reed",
-                "caption": "Chiến dịch mới sẽ bắt đầu trong ít phút nữa.",
-                "image": "https://example.com/launch-14.jpg",
-                "comment": "Đừng bỏ lỡ.",
-                "status": "Running",
-            },
-            {
-                "no": 15,
-                "page": "Emma Wilson",
-                "caption": "Nội dung đang chờ được xử lý trong hàng đợi.",
-                "image": "https://example.com/launch-15.jpg",
-                "comment": "Theo dõi trạng thái.",
-                "status": "Queued",
-            },
-            {
-                "no": 16,
-                "page": "Liam Murphy",
-                "caption": "Bài đăng mới dành cho người theo dõi của trang.",
-                "image": "https://example.com/launch-16.jpg",
-                "comment": "Xem thêm!",
-                "status": "Queued",
-            },
-            {
-                "no": 17,
-                "page": "Grace Collins",
-                "caption": "Một cập nhật quan trọng vừa được lên lịch.",
-                "image": "https://example.com/launch-17.jpg",
-                "comment": "Đọc ngay!",
-                "status": "Error",
-            },
-            {
-                "no": 18,
-                "page": "Henry Foster",
-                "caption": "Bài viết đang được chuẩn bị để xuất bản tự động.",
-                "image": "https://example.com/launch-18.jpg",
-                "comment": "Theo dõi thêm.",
-                "status": "Running",
-            },
-            {
-                "no": 19,
-                "page": "Chloe Evans",
-                "caption": "Nội dung mới đã sẵn sàng cho lượt đăng tiếp theo.",
-                "image": "https://example.com/launch-19.jpg",
-                "comment": "Khám phá ngay!",
-                "status": "Queued",
-            },
-            {
-                "no": 20,
-                "page": "Daniel Cooper",
-                "caption": "Cập nhật cuối ngày với nhiều thông tin mới.",
-                "image": "https://example.com/launch-20.jpg",
-                "comment": "Xem chi tiết.",
-                "status": "Done",
-            },
-        ]
-
-        self.table.set_data(page_rows)
+        self.table.set_data(self.page_rows)
 
         # ----- Content -----
         content = QWidget()
 
         content_layout = QVBoxLayout(content)
 
-        content_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        content_layout.setContentsMargins(0, 0, 0, 0)
 
         content_layout.setSpacing(self.CONTENT_SPACING)
 
@@ -349,10 +205,7 @@ class PageAutoPage(QWidget):
 
         content_layout.addLayout(stat_layout)
 
-        content_layout.addWidget(
-            self.table_card,
-            1,
-        )
+        content_layout.addWidget(self.table_card, 1)
 
         # ----- Page Layout -----
         layout = QVBoxLayout(self)
@@ -363,17 +216,233 @@ class PageAutoPage(QWidget):
 
         layout.addWidget(header)
 
-        layout.addWidget(
-            content,
-            1,
+        layout.addWidget(content, 1)
+
+    # ----- Set Page Data -----
+    def set_page_data(self, rows: list[dict]):
+        self.page_rows = rows
+
+        self.table.set_data(self.page_rows)
+
+        self.update_summary(self.page_rows)
+
+        self.update_stats(self.page_rows)
+
+    # ----- Page Stats -----
+    def get_page_stats(self, rows: list[dict]):
+        page_targets = {
+            row.get("page_id") or row.get("page")
+            for row in rows
+            if (row.get("page_id") or row.get("page"))
+        }
+
+        active_pages = {
+            row.get("page_id") or row.get("page")
+            for row in rows
+            if (
+                (row.get("page_id") or row.get("page"))
+                and str(row.get("page_status", "")).upper() == "ACTIVE"
+            )
+        }
+
+        review_pages = page_targets - active_pages
+
+        published = sum(
+            1 for row in rows if str(row.get("status", "")).lower() == "done"
         )
+
+        failed = sum(1 for row in rows if str(row.get("status", "")).lower() == "error")
+
+        return {
+            "page_targets": len(page_targets),
+            "active_pages": len(active_pages),
+            "review_pages": len(review_pages),
+            "published": published,
+            "failed": failed,
+        }
+
+    # ----- Update Stats -----
+    def update_stats(self, rows: list[dict]):
+        stats = self.get_page_stats(rows)
+
+        self.active_pages_card.value_label.setText(
+            (f"{stats['active_pages']} / " f"{stats['page_targets']}")
+        )
+
+        self.active_pages_card.description_label.setText(
+            self.get_review_description(stats["review_pages"])
+        )
+
+        self.published_card.value_label.setText(str(stats["published"]))
+
+        self.failed_card.value_label.setText(str(stats["failed"]))
+
+    # ----- Update Summary -----
+    def update_summary(self, rows: list[dict]):
+        page_targets = {
+            row.get("page_id") or row.get("page")
+            for row in rows
+            if (row.get("page_id") or row.get("page"))
+        }
+
+        self.summary_label.setText(
+            (f"{len(rows)} rows • " f"{len(page_targets)} page targets")
+        )
+
+    # ----- Review Description -----
+    def get_review_description(self, count: int):
+        if count == 1:
+            return "1 page needs review"
+
+        return f"{count} pages need review"
+
+    # ----- Next Automation -----
+    def set_next_automation(self, time_text: str, description: str):
+        self.automation_card.value_label.setText(time_text)
+
+        self.automation_card.description_label.setText(description)
+
+    # ----- Import Excel -----
+    def import_excel(self):
+
+        if not self.import_button.isEnabled():
+            return
+
+        try:
+            new_rows = load_page_rows()
+
+        except FileNotFoundError as error:
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                str(error),
+            )
+            return
+
+        except KeyError as error:
+            QMessageBox.warning(
+                self,
+                "Sheet Not Found",
+                f"Missing sheet: {error}",
+            )
+            return
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                str(error),
+            )
+            return
+
+        # ----- No Data -----
+        if not new_rows:
+            QMessageBox.information(
+                self,
+                "Import Excel",
+                "No Page Post data found.",
+            )
+            return
+
+        # ----- Current Status -----
+        current_status = {
+            row.get("task_id"): row.get(
+                "status",
+                "",
+            )
+            for row in self.page_rows
+            if row.get("task_id")
+        }
+
+        # ----- Restore Status -----
+        for row in new_rows:
+            task_id = row.get("task_id")
+
+            if task_id in current_status:
+                row["status"] = current_status[task_id]
+
+        # ----- Set Data -----
+        self.set_page_data(new_rows)
+
+        # ----- Show Right Actions -----
+        self.summary_label.show()
+        self.run_button.show()
+        self.stop_button.hide()
+
+    # ----- Open Excel -----
+    def open_excel(self):
+        if self.opening_download:
+            return
+
+        self.opening_download = True
+
+        try:
+            open_directory(DOWNLOAD_DIR)
+
+        except FileNotFoundError as error:
+            QMessageBox.warning(
+                self,
+                "Folder Not Found",
+                str(error),
+            )
+
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Open Folder Error",
+                str(error),
+            )
+
+        finally:
+            QTimer.singleShot(
+                1000,
+                self.unlock_open_excel,
+            )
+
+    # ----- Unlock Open Excel -----
+    def unlock_open_excel(self):
+        self.opening_download = False
 
     # ----- Start Run -----
     def start_run(self):
+        if not self.page_rows:
+            return
+
+        # ----- Lock Import -----
+        self.import_button.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+
+        # ----- Queued -----
+        for row in self.page_rows:
+
+            if row.get("status") == "Done":
+                continue
+
+            if not row.get("status"):
+                row["status"] = "Queued"
+
+        # ----- Refresh Table -----
+        self.table.set_data(self.page_rows)
+
+        self.update_stats(self.page_rows)
+
+        # ----- Button State -----
         self.run_button.hide()
         self.stop_button.show()
 
     # ----- Stop Run -----
     def stop_run(self):
+
+        # ----- Unlock Import -----
+        self.import_button.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            False,
+        )
+
+        # ----- Button State -----
         self.stop_button.hide()
-        self.run_button.show()
+
+        if self.page_rows:
+            self.run_button.show()

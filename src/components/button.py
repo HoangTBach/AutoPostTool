@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QPushButton,
+    QSizePolicy,
 )
 
 from src.styles.button_style import BUTTON_STYLE
@@ -26,7 +27,7 @@ from src.themes.color import (
 
 class Button(QPushButton):
 
-    # ----- Setting -----
+    # ----- Settings -----
     ICON_SIZE = 16
     SPACING = 8
     MARGIN = (16, 10, 16, 10)
@@ -34,100 +35,123 @@ class Button(QPushButton):
     def __init__(
         self,
         text: str,
-        icon: Path | None = None,
+        icon: str | Path | None = None,
         variant: str = "outline",
         color: str = "blue",
+        parent=None,
     ):
-        super().__init__()
+        super().__init__(parent)
 
-        # ----- Button Data -----
+        # ----- Data -----
         self.variant = variant
         self.color = color
 
-        # ----- Button Setup -----
+        self.icon_path = Path(icon) if icon else None
+
+        # ----- Button -----
         self.setObjectName("button")
-        self.setProperty("variant", variant)
-        self.setProperty("color", color)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
         self.setStyleSheet(BUTTON_STYLE)
+
+        self.setProperty("variant", self.variant)
+
+        self.setProperty("color", self.color)
+
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+
+        super().setText("")
 
         # ----- Icon -----
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(
-            self.ICON_SIZE,
-            self.ICON_SIZE,
+
+        self.icon_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
+
+        if self.icon_path:
+            self.icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+
+            self.render_icon(self.get_content_color())
+
+        else:
+            self.icon_label.hide()
 
         # ----- Text -----
         self.text_label = QLabel(text)
+
         self.text_label.setObjectName("buttonText")
 
-        # ----- Allow Button Click Through Labels -----
-        self.icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-        self.text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-        # ----- Content Color -----
-        content_color = (
-            BUTTON_WHITE if variant == "primary" else BUTTON_COLORS[color]["base"]
+        self.text_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
 
-        self.text_label.setStyleSheet(f"color: {content_color};")
+        self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        if icon:
-            self.set_icon_color(
-                icon,
-                content_color,
-            )
+        self.text_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+
+        self.set_text_color(self.get_content_color())
 
         # ----- Layout -----
         layout = QHBoxLayout(self)
+
         layout.setContentsMargins(*self.MARGIN)
-        layout.setSpacing(self.SPACING)
+
+        layout.setSpacing(self.SPACING if self.icon_path else 0)
+
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        if self.icon_path:
+            layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self.text_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
-        layout.addWidget(self.icon_label)
-        layout.addWidget(self.text_label)
+    # ----- Content Color -----
+    def get_content_color(self):
+        if self.variant == "primary":
+            return BUTTON_WHITE
 
-    # ----- Icon Color -----
-    def set_icon_color(
+        return BUTTON_COLORS[self.color]["base"]
+
+    # ----- Text Color -----
+    def set_text_color(self, color: str):
+        self.text_label.setStyleSheet(f"""
+            color: {color};
+            background-color: transparent;
+            border: none;
+            """)
+
+    # ----- Render Icon -----
+    def render_icon(
         self,
-        icon: Path,
         color: str,
     ):
-        renderer = QSvgRenderer(str(icon))
+        if not self.icon_path:
+            return
+
+        renderer = QSvgRenderer(str(self.icon_path))
 
         if not renderer.isValid():
             return
 
-        # ----- Pixmap -----
-        pixmap = QPixmap(
-            self.ICON_SIZE,
-            self.ICON_SIZE,
-        )
+        pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
+
         pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
 
-        # ----- Render SVG -----
-        renderer.render(
-            painter,
-            QRectF(
-                0,
-                0,
-                self.ICON_SIZE,
-                self.ICON_SIZE,
-            ),
-        )
+        renderer.render(painter, QRectF(0, 0, self.ICON_SIZE, self.ICON_SIZE))
 
-        # ----- Recolor SVG -----
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
 
-        painter.fillRect(
-            pixmap.rect(),
-            QColor(color),
-        )
+        painter.fillRect(pixmap.rect(), QColor(color))
 
         painter.end()
 

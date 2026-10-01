@@ -5,7 +5,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.components.sidebar import Sidebar
+from src.pages.dashboard import DashboardPage
+from src.pages.group_auto import GroupAutoPage
+from src.pages.news_auto import NewsAutoPage
 from src.pages.page_auto import PageAutoPage
+from src.pages.setting import SettingPage
+from src.pages.update import UpdatePage
 
 
 class MainLayout(QWidget):
@@ -25,7 +30,12 @@ class MainLayout(QWidget):
         # ----- Pages -----
         self.content = QStackedWidget()
         self.pages = {
+            "dashboard": DashboardPage(),
             "page_auto": PageAutoPage(),
+            "group_auto": GroupAutoPage(),
+            "news_auto": NewsAutoPage(),
+            "update": UpdatePage(),
+            "setting": SettingPage(),
         }
 
         for page in self.pages.values():
