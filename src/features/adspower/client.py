@@ -1,9 +1,6 @@
-import requests
+import requests  # type: ignore
 
-from src.configs.adspower import (
-    ADSPOWER_API_KEY,
-    ADSPOWER_TIMEOUT,
-)
+from src.configs.adspower import ADSPOWER_TIMEOUT
 
 
 class AdsPowerError(Exception):
@@ -12,17 +9,12 @@ class AdsPowerError(Exception):
 
 class AdsPowerClient:
 
-    def __init__(
-        self,
-        local_api: str,
-    ):
-        self.local_api = self.normalize_url(local_api)
+    def __init__(self, local_api: str):
+        self.base_url = self.normalize_url(local_api)
+        self.session = requests.Session()
 
-    # ----- Normalize URL -----
-    @staticmethod
-    def normalize_url(
-        local_api: str,
-    ):
+    # ----- URL -----
+    def normalize_url(self, local_api: str):
         local_api = local_api.strip()
 
         if not local_api:
@@ -33,39 +25,41 @@ class AdsPowerClient:
 
         return local_api.rstrip("/")
 
-    # ----- Headers -----
-    def get_headers(self):
-        if not ADSPOWER_API_KEY:
-            return {}
-
-        return {"Authorization": (f"Bearer {ADSPOWER_API_KEY}")}
-
-    # ----- Check Connection -----
-    def check_connection(self):
+    # ----- Request -----
+    def request(self, method: str, path: str, **kwargs):
         try:
-            response = requests.get(
-                f"{self.local_api}/status",
-                headers=self.get_headers(),
+            response = self.session.request(
+                method,
+                f"{self.base_url}{path}",
                 timeout=ADSPOWER_TIMEOUT,
+                **kwargs,
             )
 
             response.raise_for_status()
+            data = response.json()
 
-        except requests.RequestException as error:
+        except requests.Timeout as error:
+            raise AdsPowerError("AdsPower connection timed out.") from error
+
+        except requests.ConnectionError as error:
             raise AdsPowerError("Cannot connect to AdsPower.") from error
 
-        try:
-            data = response.json()
+        except requests.RequestException as error:
+            raise AdsPowerError(str(error)) from error
 
         except ValueError as error:
             raise AdsPowerError("Invalid response from AdsPower.") from error
 
         if data.get("code") != 0:
-            raise AdsPowerError(
-                data.get(
-                    "msg",
-                    "AdsPower connection failed.",
-                )
-            )
+            raise AdsPowerError(data.get("msg") or "AdsPower request failed.")
 
+        return data
+
+    # ----- Connection -----
+    def check_connection(self):
+        self.request("GET", "/status")
         return True
+
+    # ----- Close -----
+    def close(self):
+        self.session.close()
