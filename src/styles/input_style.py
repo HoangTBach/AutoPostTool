@@ -1,6 +1,6 @@
 from src.themes.color import (
-    TABLE_INPUT_BG,
-    TABLE_INPUT_BORDER,
+    INPUT_BG,
+    INPUT_BORDER,
     TEXT_COLOR,
 )
 from src.themes.font import (
@@ -10,10 +10,10 @@ from src.themes.font import (
 
 INPUT_STYLE = f"""
 QLineEdit#input {{
-    background-color: {TABLE_INPUT_BG};
+    background-color: {INPUT_BG};
     color: {TEXT_COLOR};
 
-    border: 1px solid {TABLE_INPUT_BORDER};
+    border: 1px solid {INPUT_BORDER};
     border-radius: 6px;
 
     padding: 0px 10px;

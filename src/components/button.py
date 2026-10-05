@@ -1,14 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import (
-    QRectF,
-    Qt,
-)
-from PySide6.QtGui import (
-    QColor,
-    QPainter,
-    QPixmap,
-)
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -23,6 +16,29 @@ from src.themes.color import (
     BUTTON_COLORS,
     BUTTON_WHITE,
 )
+
+
+class ButtonIcon(QLabel):
+
+    def __init__(self):
+        super().__init__()
+
+        self.icon_pixmap = QPixmap()
+
+    def set_icon_pixmap(self, pixmap: QPixmap):
+        self.icon_pixmap = pixmap
+        self.update()
+
+    def paintEvent(self, event):
+        if self.icon_pixmap.isNull():
+            return
+
+        painter = QPainter(self)
+
+        x = (self.width() - self.icon_pixmap.width()) // 2
+        y = (self.height() - self.icon_pixmap.height()) // 2
+
+        painter.drawPixmap(x, y, self.icon_pixmap)
 
 
 class Button(QPushButton):
@@ -45,27 +61,21 @@ class Button(QPushButton):
         # ----- Data -----
         self.variant = variant
         self.color = color
-
         self.icon_path = Path(icon) if icon else None
 
         # ----- Button -----
         self.setObjectName("button")
-
         self.setStyleSheet(BUTTON_STYLE)
 
         self.setProperty("variant", self.variant)
-
         self.setProperty("color", self.color)
 
-        self.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         super().setText("")
 
         # ----- Icon -----
-        self.icon_label = QLabel()
+        self.icon_label = ButtonIcon()
 
         self.icon_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
@@ -81,7 +91,6 @@ class Button(QPushButton):
 
         # ----- Text -----
         self.text_label = QLabel(text)
-
         self.text_label.setObjectName("buttonText")
 
         self.text_label.setAttribute(
@@ -91,17 +100,14 @@ class Button(QPushButton):
         self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.text_label.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
         )
 
         self.set_text_color(self.get_content_color())
 
         # ----- Layout -----
         layout = QHBoxLayout(self)
-
         layout.setContentsMargins(*self.MARGIN)
-
         layout.setSpacing(self.SPACING if self.icon_path else 0)
 
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -129,10 +135,7 @@ class Button(QPushButton):
             """)
 
     # ----- Render Icon -----
-    def render_icon(
-        self,
-        color: str,
-    ):
+    def render_icon(self, color: str):
         if not self.icon_path:
             return
 
@@ -155,4 +158,4 @@ class Button(QPushButton):
 
         painter.end()
 
-        self.icon_label.setPixmap(pixmap)
+        self.icon_label.set_icon_pixmap(pixmap)

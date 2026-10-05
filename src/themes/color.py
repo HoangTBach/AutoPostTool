@@ -38,6 +38,11 @@ BUTTON_COLORS = {
         "hover": "#DC2626",
         "hover_bg": "#FEF2F2",
     },
+    "gray": {
+        "base": "#94A3B8",
+        "hover": "#475569",
+        "hover_bg": "#F1F5F9",
+    },
 }
 
 # ----- Card Color -----
@@ -45,6 +50,10 @@ CARD_BG = "#FFFFFF"
 CARD_BORDER = "#E2E8F0"
 CARD_TITLE = "#64748B"
 CARD_DESCRIPTION = "#94A3B8"
+
+# ----- Input Color -----
+INPUT_BG = "#F8FAFC"
+INPUT_BORDER = "#DBE2EB"
 
 # ----- Stat Color -----
 STAT_COLORS = {
@@ -70,13 +79,13 @@ STAT_COLORS = {
 TABLE_HEADER_BG = "#F6F8FB"
 TABLE_HEADER_TEXT = "#0F172A"
 TABLE_TEXT_MUTED = "#64748B"
-TABLE_INPUT_BG = "#F8FAFC"
-TABLE_INPUT_BORDER = "#DCE3EC"
 
 STATUS_DONE = "#10B981"
 STATUS_ERROR = "#EF4444"
 STATUS_RUNNING = "#2563EB"
 STATUS_QUEUED = "#94A3B8"
+
+TEXT_SUMMARY = "#64748B"
 
 # ----- Connection Status -----
 CONNECTION_DEFAULT = "#64748B"

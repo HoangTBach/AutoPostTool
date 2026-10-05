@@ -1,8 +1,4 @@
 from src.themes.color import (
-    BUTTON_BORDER,
-    BUTTON_COLORS,
-    BUTTON_WHITE,
-    CARD_BG,
     CARD_BORDER,
     CARD_DESCRIPTION,
     CARD_TITLE,
@@ -14,7 +10,6 @@ from src.themes.color import (
     CONNECTION_DISCONNECTED_BG,
     CONNECTION_TESTING,
     CONNECTION_TESTING_BG,
-    TABLE_HEADER_BG,
     TEXT_COLOR,
 )
 
@@ -22,6 +17,7 @@ from src.themes.font import (
     FONT_SIZE_10,
     FONT_SIZE_11,
     FONT_SIZE_12,
+    FONT_SIZE_13,
     FONT_SIZE_14,
     FONT_WEIGHT_REGULAR,
     FONT_WEIGHT_BOLD,
@@ -29,15 +25,6 @@ from src.themes.font import (
 )
 
 SETTING_STYLE = f"""
-/* ----- Card ----- */
-
-QWidget#adsPowerCard {{
-    background-color: {CARD_BG};
-    border: 1px solid {CARD_BORDER};
-    border-radius: 12px;
-}}
-
-
 /* ----- Header ----- */
 
 QLabel#settingCardTitle {{
@@ -110,6 +97,15 @@ QLabel#settingLabel {{
 
     font-size: {FONT_SIZE_11}px;
     font-weight: {FONT_WEIGHT_SEMIBOLD};
+}}
+
+QLabel#apiKeyLabel {{
+    background-color: transparent;
+    color: {CARD_TITLE};
+    border: none;
+
+    font-size: {FONT_SIZE_13}px;
+    font-weight: {FONT_WEIGHT_REGULAR};
 }}
 
 

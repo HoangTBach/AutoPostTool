@@ -6,8 +6,8 @@ from src.themes.color import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     TABLE_HEADER_BG,
-    TABLE_INPUT_BG,
-    TABLE_INPUT_BORDER,
+    INPUT_BG,
+    INPUT_BORDER,
     TEXT_COLOR,
 )
 
@@ -102,10 +102,10 @@ QLabel#tableText[column="page"] {{
 /* ----- Box ----- */
 
 QLabel#tableBox {{
-    background-color: {TABLE_INPUT_BG};
+    background-color: {INPUT_BG};
     color: {TEXT_COLOR};
 
-    border: 1px solid {TABLE_INPUT_BORDER};
+    border: 1px solid {INPUT_BORDER};
     border-radius: 6px;
 
     min-height: 30px;

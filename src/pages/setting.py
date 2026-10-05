@@ -10,17 +10,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.components.button import Button
+from src.components.card import Card
 from src.components.input import Input
 from src.components.page_header import PageHeader
 from src.components.toggle_switch import ToggleSwitch
-
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
-
-from src.features.adspower.client import (
-    AdsPowerClient,
-    AdsPowerError,
-)
-
+from src.features.adspower.worker import AdsPowerCheckWorker
 from src.styles.setting_style import SETTING_STYLE
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
@@ -39,7 +34,7 @@ class SettingPage(QWidget):
     BUTTON_SPACING = 8
 
     AUTO_RECONNECT_DEFAULT = False
-    AUTO_RECONNECT_INTERVAL = 30000
+    AUTO_RECONNECT_INTERVAL = 15000
 
     def __init__(self):
         super().__init__()
@@ -47,8 +42,12 @@ class SettingPage(QWidget):
         self.setStyleSheet(SETTING_STYLE)
 
         # ----- State -----
-        self.adspower_client = None
         self.is_connected = False
+        self.check_worker = None
+        self.check_action = None
+
+        self.connected_local_api = ""
+        self.connected_api_key = ""
 
         self.reconnect_timer = QTimer(self)
         self.reconnect_timer.setInterval(self.AUTO_RECONNECT_INTERVAL)
@@ -61,8 +60,7 @@ class SettingPage(QWidget):
         )
 
         # ----- Card -----
-        card = QWidget()
-        card.setObjectName("adsPowerCard")
+        card = Card()
 
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(*self.CARD_MARGIN)
@@ -84,7 +82,10 @@ class SettingPage(QWidget):
         # ----- Connection Status -----
         self.status_label = QLabel("● Disconnected")
         self.status_label.setObjectName("connectionStatus")
-        self.status_label.setProperty("state", "disconnected")
+        self.status_label.setProperty(
+            "state",
+            "disconnected",
+        )
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         header_layout = QHBoxLayout()
@@ -101,6 +102,7 @@ class SettingPage(QWidget):
         # ----- Divider -----
         divider = QWidget()
         divider.setObjectName("settingDivider")
+
         card_layout.addWidget(divider)
 
         # ----- Local API -----
@@ -112,11 +114,26 @@ class SettingPage(QWidget):
             editable=False,
         )
 
+        # ----- API Key -----
+        api_key_label = QLabel("API key")
+        api_key_label.setObjectName("settingLabel")
+
+        self.api_key_input = Input(
+            editable=True,
+            password=True,
+        )
+
+        self.api_key_input.setPlaceholderText("Enter API key")
+
         form_layout = QVBoxLayout()
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setSpacing(self.FORM_SPACING)
+
         form_layout.addWidget(api_label)
         form_layout.addWidget(self.api_input)
+
+        form_layout.addWidget(api_key_label)
+        form_layout.addWidget(self.api_key_input)
 
         card_layout.addLayout(form_layout)
 
@@ -138,14 +155,23 @@ class SettingPage(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(self.BUTTON_SPACING)
-        button_layout.addWidget(self.test_button, 1)
-        button_layout.addWidget(self.connect_button, 1)
+
+        button_layout.addWidget(
+            self.test_button,
+            1,
+        )
+
+        button_layout.addWidget(
+            self.connect_button,
+            1,
+        )
 
         card_layout.addLayout(button_layout)
 
         # ----- Divider -----
         reconnect_divider = QWidget()
         reconnect_divider.setObjectName("settingDivider")
+
         card_layout.addWidget(reconnect_divider)
 
         # ----- Auto Reconnect -----
@@ -156,8 +182,14 @@ class SettingPage(QWidget):
         self.reconnect_switch.setChecked(self.AUTO_RECONNECT_DEFAULT)
 
         reconnect_layout = QHBoxLayout()
-        reconnect_layout.setContentsMargins(0, 0, 0, 0)
+        reconnect_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
         reconnect_layout.setSpacing(0)
+
         reconnect_layout.addWidget(reconnect_label)
         reconnect_layout.addStretch()
         reconnect_layout.addWidget(self.reconnect_switch)
@@ -166,8 +198,14 @@ class SettingPage(QWidget):
 
         # ----- Content -----
         content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(
+            0,
+            0,
+            0,
+            0,
+        )
         content_layout.setSpacing(12)
+
         content_layout.addWidget(card, 1)
         content_layout.addStretch(1)
 
@@ -175,152 +213,195 @@ class SettingPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*self.MARGIN)
         layout.setSpacing(self.SPACING)
+
         layout.addWidget(header)
         layout.addLayout(content_layout)
         layout.addStretch()
 
         # ----- Events -----
         self.test_button.clicked.connect(self.test_connection)
+
         self.connect_button.clicked.connect(self.connect_adspower)
+
         self.reconnect_switch.toggled.connect(self.toggle_auto_reconnect)
+
+        self.api_key_input.textChanged.connect(self.handle_credentials_changed)
 
         self.update_actions()
 
-    # ----- Actions -----
-    def update_actions(self):
-        self.connect_button.setEnabled(not self.is_connected)
-
-    # ----- Test Connection -----
+    # ----- Test -----
     def test_connection(self):
-        was_connected = self.is_connected
+        self.start_check("test")
 
+    # ----- Connect -----
+    def connect_adspower(self):
+        if self.is_connected:
+            return
+
+        self.start_check("connect")
+
+    # ----- Check -----
+    def start_check(self, action: str):
+        if self.check_worker and self.check_worker.isRunning():
+            return
+
+        local_api = self.api_input.text().strip()
+        api_key = self.api_key_input.text().strip()
+
+        if not local_api:
+            if action != "auto":
+                QMessageBox.warning(
+                    self,
+                    "AdsPower",
+                    "Local API is required.",
+                )
+            return
+
+        if not api_key:
+            if action != "auto":
+                QMessageBox.warning(
+                    self,
+                    "AdsPower",
+                    "API key is required.",
+                )
+            return
+
+        self.check_action = action
         self.set_connection_state("testing")
-        self.test_button.setEnabled(False)
-        self.connect_button.setEnabled(False)
 
-        try:
-            if was_connected and self.adspower_client:
-                self.adspower_client.check_connection()
+        self.check_worker = AdsPowerCheckWorker(
+            local_api,
+            api_key,
+        )
 
-            else:
-                client = AdsPowerClient(self.api_input.text())
+        self.check_worker.result.connect(self.handle_check_result)
+        self.check_worker.finished.connect(self.clear_check_worker)
 
-                try:
-                    client.check_connection()
-                finally:
-                    client.close()
+        self.update_actions()
+        self.check_worker.start()
 
-        except AdsPowerError as error:
-            print(f"AdsPower Test: Failed - {error}")
+    def handle_check_result(
+        self,
+        success: bool,
+        error: str,
+    ):
+        action = self.check_action
 
-            if was_connected:
-                self.disconnect_adspower()
+        if success:
+            if action in (
+                "connect",
+                "auto",
+            ):
+                self.set_connected()
+
+            elif self.is_connected:
+                self.set_connection_state("connected")
+
             else:
                 self.set_connection_state("disconnected")
 
-            QMessageBox.warning(self, "AdsPower Test", str(error))
+            if action == "test":
+                QMessageBox.information(
+                    self,
+                    "AdsPower Test",
+                    "AdsPower Local API is working.",
+                )
+
             return
 
-        finally:
-            self.test_button.setEnabled(True)
-            self.update_actions()
+        if action == "auto":
+            self.set_disconnected()
+            return
 
-        print("AdsPower Test: Success")
+        if action == "connect":
+            self.set_disconnected()
 
-        if was_connected:
-            self.set_connection_state("connected")
+        elif self.is_connected:
+            self.set_disconnected()
+
         else:
             self.set_connection_state("disconnected")
 
-        QMessageBox.information(
+        QMessageBox.warning(
             self,
-            "AdsPower Test",
-            "Local API is working.",
+            "AdsPower",
+            error,
         )
 
-    # ----- Connect -----
-    def connect_adspower(self, silent=False):
-        if self.is_connected:
-            return True
+    def clear_check_worker(self):
+        if self.check_worker:
+            self.check_worker.deleteLater()
+            self.check_worker = None
 
-        self.set_connection_state("testing")
-        self.test_button.setEnabled(False)
-        self.connect_button.setEnabled(False)
+        self.check_action = None
 
-        client = AdsPowerClient(self.api_input.text())
+        self.update_actions()
 
-        try:
-            client.check_connection()
-
-        except AdsPowerError as error:
-            client.close()
-
-            self.is_connected = False
-            self.set_connection_state("disconnected")
-
-            print(f"AdsPower: Disconnected - {error}")
-
-            if not silent:
-                QMessageBox.warning(self, "AdsPower", str(error))
-
-            self.test_button.setEnabled(True)
-            self.update_actions()
-
-            return False
-
-        if self.adspower_client:
-            self.adspower_client.close()
-
-        self.adspower_client = client
+    # ----- Connected -----
+    def set_connected(self):
         self.is_connected = True
+
+        self.connected_local_api = self.api_input.text().strip()
+
+        self.connected_api_key = self.api_key_input.text().strip()
 
         self.set_connection_state("connected")
 
-        self.test_button.setEnabled(True)
-        self.update_actions()
-
-        print(f"AdsPower: Connected - {self.api_input.text()}")
-
-        return True
-
-        # ----- Disconnect -----
-
-    def disconnect_adspower(self):
-        if self.adspower_client:
-            self.adspower_client.close()
-            self.adspower_client = None
-
+    def set_disconnected(self):
         self.is_connected = False
 
+        self.connected_local_api = ""
+        self.connected_api_key = ""
+
         self.set_connection_state("disconnected")
+
+    # ----- Credentials -----
+    def handle_credentials_changed(self):
+        current_api_key = self.api_key_input.text().strip()
+
+        if self.is_connected and current_api_key != self.connected_api_key:
+            self.set_disconnected()
+
         self.update_actions()
 
-        print("AdsPower: Disconnected")
-
     # ----- Auto Reconnect -----
-    def toggle_auto_reconnect(self, checked: bool):
+    def toggle_auto_reconnect(
+        self,
+        checked: bool,
+    ):
         if checked:
             self.reconnect_timer.start()
 
-            if not self.is_connected:
-                self.connect_adspower(silent=True)
+            QTimer.singleShot(
+                0,
+                self.auto_reconnect,
+            )
 
         else:
             self.reconnect_timer.stop()
 
     def auto_reconnect(self):
-        if self.is_connected and self.adspower_client:
-            try:
-                self.adspower_client.check_connection()
-                return
+        if self.check_worker and self.check_worker.isRunning():
+            return
 
-            except AdsPowerError:
-                self.disconnect_adspower()
+        self.start_check("auto")
 
-        self.connect_adspower(silent=True)
+    # ----- Actions -----
+    def update_actions(self):
+        busy = self.check_worker is not None and self.check_worker.isRunning()
+        has_api_key = bool(self.api_key_input.text().strip())
 
-    # ----- Connection State -----
-    def set_connection_state(self, state: str):
+        self.test_button.setEnabled(not busy and has_api_key)
+
+        self.connect_button.setEnabled(
+            not busy and has_api_key and not self.is_connected
+        )
+
+    # ----- Status -----
+    def set_connection_state(
+        self,
+        state: str,
+    ):
         states = {
             "connected": "● Connected",
             "disconnected": "● Disconnected",
@@ -328,16 +409,22 @@ class SettingPage(QWidget):
         }
 
         self.status_label.setText(states[state])
-        self.status_label.setProperty("state", state)
+
+        self.status_label.setProperty(
+            "state",
+            state,
+        )
 
         self.status_label.style().unpolish(self.status_label)
+
         self.status_label.style().polish(self.status_label)
 
     # ----- Close -----
     def closeEvent(self, event):
         self.reconnect_timer.stop()
 
-        if self.adspower_client:
-            self.adspower_client.close()
+        if self.check_worker and self.check_worker.isRunning():
+            self.check_worker.quit()
+            self.check_worker.wait()
 
         super().closeEvent(event)
