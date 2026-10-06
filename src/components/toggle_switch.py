@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.themes.color import COLORS
+from src.themes.spacing import SPACING as SPACE
 
 
 class ToggleSwitch(QAbstractButton):
@@ -20,7 +21,7 @@ class ToggleSwitch(QAbstractButton):
     # ----- Settings -----
     WIDTH = 32
     HEIGHT = 18
-    MARGIN = 2
+    MARGIN = SPACE[2]
     DURATION = 160
 
     OFF_COLOR = COLORS["slate"][300]

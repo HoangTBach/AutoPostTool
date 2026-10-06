@@ -28,9 +28,12 @@ from src.styles.sidebar_menu_style import (
     MENU_TEXT_HOVER,
     SIDEBAR_MENU_STYLE,
 )
+from src.themes.color import COLORS
 from src.themes.font import FONTS
 from src.themes.radius import RADIUS
 from src.themes.spacing import SPACING as SPACE
+
+TRANSPARENT = COLORS["transparent"]
 
 ACTIVE_BAR_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "icons" / "active-bar.svg"
@@ -58,7 +61,7 @@ class MenuButton(QPushButton):
         self.icon_path = icon
         self.active = False
         self.hovered = False
-        self.background_color = QColor("transparent")
+        self.background_color = QColor(TRANSPARENT)
 
         # ----- Button Setup -----
         self.setObjectName("menuButton")
@@ -127,7 +130,7 @@ class MenuButton(QPushButton):
             return
 
         pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
@@ -161,7 +164,7 @@ class MenuButton(QPushButton):
         width = round(self.ACTIVE_BAR_HEIGHT * svg_size.width() / svg_size.height())
 
         pixmap = QPixmap(width, self.ACTIVE_BAR_HEIGHT)
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
@@ -215,7 +218,7 @@ class MenuButton(QPushButton):
             else:
                 self.set_icon_color(MENU_TEXT)
                 self.set_text_style(MENU_TEXT, FONTS["weight"]["medium"])
-                self.animate_background("transparent")
+                self.animate_background(TRANSPARENT)
 
     # ----- Hover State -----
     def set_hover(self, hovered: bool):
@@ -231,7 +234,7 @@ class MenuButton(QPushButton):
         else:
             self.set_icon_color(MENU_TEXT)
             self.set_text_style(MENU_TEXT, FONTS["weight"]["medium"])
-            self.animate_background("transparent")
+            self.animate_background(TRANSPARENT)
 
     # ----- Hover Enter -----
     def enterEvent(self, event):

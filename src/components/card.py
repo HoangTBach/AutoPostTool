@@ -18,8 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.styles.card_style import CARD_STYLE, STAT_COLORS
+from src.themes.color import COLORS
 from src.themes.radius import RADIUS
 from src.themes.spacing import SPACING as SPACE
+
+TRANSPARENT = COLORS["transparent"]
 
 
 class Card(QWidget):
@@ -140,7 +143,7 @@ class StatCard(Card):
             self.ICON_SIZE,
         )
 
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 

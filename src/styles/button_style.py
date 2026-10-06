@@ -1,8 +1,10 @@
+from src.themes.border import BORDERS
 from src.themes.color import COLORS
 from src.themes.font import FONTS
 from src.themes.radius import RADIUS
 
 # ----- Colors -----
+TRANSPARENT = COLORS["transparent"]
 BUTTON_WHITE = COLORS["neutral"]["white"]
 BUTTON_BORDER = COLORS["slate"]["input_border"]
 
@@ -29,21 +31,23 @@ BUTTON_COLORS = {
     },
 }
 
+# ----- Border -----
+BORDER_WIDTH = BORDERS["width"]["default"]
+
 
 BUTTON_STYLE = f"""
 QPushButton#button {{
-    background-color: transparent;
-    border: 1px solid {BUTTON_BORDER};
+    background-color: {TRANSPARENT};
+    border: {BORDER_WIDTH}px solid {BUTTON_BORDER};
     border-radius: {RADIUS["medium"]}px;
 }}
 
 QLabel#buttonText {{
-    background-color: transparent;
+    background-color: {TRANSPARENT};
     font-size: {FONTS["size"][14]}px;
     font-weight: {FONTS["weight"]["semibold"]};
 }}
 """
-
 
 for name, color in BUTTON_COLORS.items():
     BUTTON_STYLE += f"""
@@ -58,7 +62,6 @@ for name, color in BUTTON_COLORS.items():
         background-color: {color["hover_bg"]};
         border-color: {color["base"]};
     }}
-
 
     /* ----- Primary ----- */
 

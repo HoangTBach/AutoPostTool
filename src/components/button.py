@@ -16,7 +16,10 @@ from src.styles.button_style import (
     BUTTON_STYLE,
     BUTTON_WHITE,
 )
+from src.themes.color import COLORS
 from src.themes.spacing import SPACING as SPACE
+
+TRANSPARENT = COLORS["transparent"]
 
 
 class ButtonIcon(QLabel):
@@ -136,7 +139,7 @@ class Button(QPushButton):
     def set_text_color(self, color: str):
         self.text_label.setStyleSheet(f"""
             color: {color};
-            background-color: transparent;
+            background-color: {TRANSPARENT};
             border: none;
             """)
 
@@ -152,7 +155,7 @@ class Button(QPushButton):
 
         pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
 
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
