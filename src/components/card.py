@@ -17,8 +17,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.styles.card_style import CARD_STYLE
-from src.themes.color import STAT_COLORS
+from src.styles.card_style import CARD_STYLE, STAT_COLORS
+from src.themes.color import COLORS
+from src.themes.radius import RADIUS
+from src.themes.spacing import SPACING as SPACE
+
+TRANSPARENT = COLORS["transparent"]
 
 
 class Card(QWidget):
@@ -41,12 +45,12 @@ class Card(QWidget):
 class StatCard(Card):
 
     # ----- Settings -----
-    MARGIN = (16, 16, 16, 16)
-    SPACING = 12
+    MARGIN = (SPACE[16], SPACE[16], SPACE[16], SPACE[16])
+    SPACING = SPACE[12]
 
     ICON_SIZE = 20
     ICON_BOX_SIZE = 40
-    TEXT_SPACING = 1
+    TEXT_SPACING = SPACE["legacy"][1]
 
     def __init__(
         self,
@@ -72,7 +76,7 @@ class StatCard(Card):
 
         self.icon_box.setStyleSheet(f"""
             background-color: {stat_color["bg"]};
-            border-radius: 10px;
+            border-radius: {RADIUS["icon"]}px;
             """)
 
         self.set_svg_icon(
@@ -139,7 +143,7 @@ class StatCard(Card):
             self.ICON_SIZE,
         )
 
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
@@ -168,9 +172,14 @@ class StatCard(Card):
 class TableCard(Card):
 
     # ----- Settings -----
-    HEADER_MARGIN = (24, 12, 24, 10)
+    HEADER_MARGIN = (
+        SPACE[24],
+        SPACE[12],
+        SPACE[24],
+        SPACE["legacy"][10],
+    )
     BODY_MARGIN = (0, 0, 0, 0)
-    SPACING = 0
+    SPACING = SPACE[0]
 
     def __init__(
         self,

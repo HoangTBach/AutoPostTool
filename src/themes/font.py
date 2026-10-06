@@ -1,22 +1,38 @@
-# ----- Font Family -----
-FONT_FAMILY = "Geist"
-
-
-# ----- Font Sizes (px) -----
-FONT_SIZE_9 = 9
-FONT_SIZE_10 = 10
-FONT_SIZE_11 = 11
-FONT_SIZE_12 = 12
-FONT_SIZE_13 = 13
-FONT_SIZE_14 = 14
-FONT_SIZE_16 = 16
-FONT_SIZE_20 = 20
-FONT_SIZE_24 = 24
-FONT_SIZE_28 = 28
-
-
-# ----- Font Weights -----
-FONT_WEIGHT_REGULAR = 400
-FONT_WEIGHT_MEDIUM = 500
-FONT_WEIGHT_SEMIBOLD = 600
-FONT_WEIGHT_BOLD = 700
+# ----- Font -----
+FONTS = {
+    "family": {
+        "primary": "Geist",
+    },
+    "weight": {
+        "regular": 400,
+        "medium": 500,
+        "semibold": 600,
+        "bold": 700,
+    },
+    "size": {
+        9: 9,
+        10: 10,
+        11: 11,
+        12: 12,
+        13: 13,
+        14: 14,
+        16: 16,
+        18: 18,
+        20: 20,
+        24: 24,
+        28: 28,
+        30: 30,
+    },
+    "line_height": {
+        "auto": None,
+        14: 14,
+        18: 18,
+        20: 20,
+        "150_percent": "150%",
+    },
+    "letter_spacing": {
+        "normal": "0%",
+        "zero": 0,
+        "precise": 0.22,
+    },
+}

@@ -2,55 +2,51 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-# ----- Paths -----
-ROOT_DIR = Path(__file__).resolve().parents[3]
+from src.features.page_posting.helper import clean_value, get_number
 
+ROOT_DIR = Path(__file__).resolve().parents[3]
 DATA_FILE = ROOT_DIR / "data" / "Databook.xlsx"
 
 
-# ----- Load Page Rows -----
-def load_page_rows():
+# ----- File -----
+def get_data_file_stamp() -> tuple[int, int]:
+    if not DATA_FILE.exists():
+        raise FileNotFoundError(f"Cannot find: {DATA_FILE}")
+
+    stat = DATA_FILE.stat()
+
+    return stat.st_mtime_ns, stat.st_size
+
+
+# ----- Load -----
+def load_page_rows() -> list[dict]:
     if not DATA_FILE.exists():
         raise FileNotFoundError(f"Cannot find: {DATA_FILE}")
 
     workbook = load_workbook(
         DATA_FILE,
-        data_only=True,
         read_only=True,
+        data_only=True,
+        keep_links=False,
     )
 
     try:
-        # ----- Sheets -----
-        page_sheet = workbook["PAGE"]
-        post_sheet = workbook["PAGE_POST"]
+        profiles = _sheet_to_dicts(workbook["ADSPOWER"])
+        vias = _sheet_to_dicts(workbook["VIA"])
+        pages = _sheet_to_dicts(workbook["PAGE"])
+        posts = _sheet_to_dicts(workbook["PAGE_POST"])
 
-        pages = sheet_to_dicts(page_sheet)
+        profile_map = _build_map(profiles, "profile_id")
+        via_map = _build_map(vias, "via_id")
+        page_map = _build_map(pages, "page_id")
 
-        posts = sheet_to_dicts(post_sheet)
-
-        # ----- Page Map -----
-        page_map = {}
-
-        for page in pages:
-            page_id = clean_value(page.get("page_id"))
-
-            if not page_id:
-                continue
-
-            page["_page_order"] = page["_row_order"]
-
-            page_map[page_id] = page
-
-        # ----- Build Rows -----
         rows = []
 
         for post in posts:
+            post_id = clean_value(post.get("post_id"))
             page_id = clean_value(post.get("page_id"))
 
-            if not page_id:
-                continue
-
-            if not has_post_data(post):
+            if not post_id or not page_id:
                 continue
 
             page = page_map.get(page_id)
@@ -58,58 +54,35 @@ def load_page_rows():
             if not page:
                 continue
 
-            post_id = clean_value(post.get("post_id"))
+            via_id = clean_value(page.get("via_id"))
+            via = via_map.get(via_id)
 
-            # ----- Task ID -----
-            task_id = create_task_id(
-                post_id=post_id,
-                page_id=page_id,
-                row_order=post["_row_order"],
-            )
+            if not via:
+                continue
+
+            profile_id = clean_value(via.get("profile_id"))
+            profile = profile_map.get(profile_id, {})
 
             rows.append(
                 {
-                    "no": 0,
-                    # ----- Task -----
-                    "task_id": task_id,
-                    # ----- Table Data -----
-                    "page": (clean_value(page.get("page_name")) or page_id),
+                    "task_id": f"{post_id}|{profile_id}|{via_id}|{page_id}",
+                    "post_id": post_id,
+                    "post_order": get_number(post.get("post_order")),
+                    "profile_id": profile_id,
+                    "profile_uid": clean_value(profile.get("profile_uid")),
+                    "profile_name": clean_value(profile.get("profile_name")),
+                    "profile_status": clean_value(profile.get("status")),
+                    "via_id": via_id,
+                    "via_name": clean_value(via.get("via_name")),
+                    "page_id": page_id,
+                    "page": clean_value(page.get("page_name")) or page_id,
+                    "page_link": clean_value(page.get("page_link")),
+                    "page_status": clean_value(page.get("status")),
                     "caption": clean_value(post.get("caption")),
                     "image": clean_value(post.get("image")),
                     "comment": clean_value(post.get("comment")),
                     "status": "",
-                    # ----- Page Data -----
-                    "page_id": page_id,
-                    "page_order": page["_page_order"],
-                    "page_status": clean_value(page.get("status")),
-                    "page_link": clean_value(page.get("page_link")),
-                    "via_id": clean_value(page.get("via_id")),
-                    # ----- Post Data -----
-                    "post_id": post_id,
-                    "post_order": get_order(post.get("post_order")),
-                    # Chỉ dùng nội bộ để sort
-                    "_post_row_order": post["_row_order"],
                 }
-            )
-
-        rows.sort(
-            key=lambda row: (
-                row["post_order"],
-                row["page_order"],
-                row["_post_row_order"],
-            )
-        )
-
-        # ----- Reset No -----
-        for index, row in enumerate(
-            rows,
-            start=1,
-        ):
-            row["no"] = index
-
-            row.pop(
-                "_post_row_order",
-                None,
             )
 
         return rows
@@ -118,84 +91,48 @@ def load_page_rows():
         workbook.close()
 
 
-# ----- Sheet To Dicts -----
-def sheet_to_dicts(sheet):
+# ----- Map -----
+def _build_map(rows: list[dict], key: str) -> dict[str, dict]:
+    result = {}
+
+    for row in rows:
+        value = clean_value(row.get(key))
+
+        if not value:
+            continue
+
+        if value in result:
+            raise ValueError(f"Duplicate {key}: {value}")
+
+        result[value] = row
+
+    return result
+
+
+# ----- Sheet -----
+def _sheet_to_dicts(sheet) -> list[dict]:
     values = sheet.iter_rows(values_only=True)
 
     try:
         headers = next(values)
-
     except StopIteration:
         return []
 
-    # ----- Headers -----
     headers = [clean_value(header) for header in headers]
+    rows = []
 
-    data = []
-
-    for row_order, values_row in enumerate(
-        values,
-        start=1,
-    ):
-        # ----- Skip Empty Row -----
-        if not any(value is not None and str(value).strip() for value in values_row):
+    for values_row in values:
+        if not any(clean_value(value) for value in values_row):
             continue
 
-        row = {"_row_order": row_order}
+        row = {}
 
         for index, header in enumerate(headers):
             if not header:
                 continue
 
-            value = values_row[index] if index < len(values_row) else None
+            row[header] = values_row[index] if index < len(values_row) else None
 
-            row[header] = value
+        rows.append(row)
 
-        data.append(row)
-
-    return data
-
-
-# ----- Has Post Data -----
-def has_post_data(post):
-    fields = (
-        "post_id",
-        "caption",
-        "image",
-        "comment",
-    )
-
-    return any(clean_value(post.get(field)) for field in fields)
-
-
-# ----- Create Task ID -----
-def create_task_id(
-    post_id: str,
-    page_id: str,
-    row_order: int,
-):
-
-    if post_id:
-        return f"{post_id}|{page_id}"
-
-    return f"ROW{row_order}|{page_id}"
-
-
-# ----- Clean Value -----
-def clean_value(value):
-    if value is None:
-        return ""
-
-    return str(value).strip()
-
-
-# ----- Get Order -----
-def get_order(value):
-    if value is None or value == "":
-        return float("inf")
-
-    try:
-        return int(value)
-
-    except (TypeError, ValueError):
-        return float("inf")
+    return rows

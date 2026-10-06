@@ -11,13 +11,14 @@ from PySide6.QtWidgets import (
 
 from src.configs.setting import SIDEBAR_NAME, SIDEBAR_META
 from src.styles.sidebar_header_style import SIDEBAR_HEADER_STYLE
+from src.themes.spacing import SPACING as SPACE
 
 
 class SidebarHeader(QWidget):
 
     # ----- Settings -----
     LOGO_SIZE = 36
-    SPACING = 12
+    SPACING = SPACE[12]
 
     def __init__(self):
         super().__init__()
@@ -55,7 +56,7 @@ class SidebarHeader(QWidget):
         # ----- Text Layout -----
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(SPACE[2])
 
         text_layout.addWidget(app_name)
         text_layout.addWidget(app_meta)

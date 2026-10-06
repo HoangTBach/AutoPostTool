@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
 )
 
 from src.styles.page_header_style import PAGE_HEADER_STYLE
+from src.themes.spacing import SPACING as SPACE
 
 
 class PageHeader(QWidget):
 
     # ----- Setting -----
-    SPACING = 4
+    SPACING = SPACE[4]
 
     def __init__(self, title: str, subtitle: str):
         super().__init__()
@@ -39,5 +40,5 @@ class PageHeader(QWidget):
         layout.addWidget(title_label)
         layout.addWidget(subtitle_label)
 
-        layout.addSpacing(12)
+        layout.addSpacing(SPACE[12])
         layout.addWidget(divider)

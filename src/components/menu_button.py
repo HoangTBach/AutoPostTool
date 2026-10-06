@@ -20,18 +20,20 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
-from src.styles.sidebar_menu_style import SIDEBAR_MENU_STYLE
-from src.themes.color import (
+from src.styles.sidebar_menu_style import (
     MENU_BG_ACTIVE,
     MENU_BG_HOVER,
     MENU_TEXT,
     MENU_TEXT_ACTIVE,
     MENU_TEXT_HOVER,
+    SIDEBAR_MENU_STYLE,
 )
-from src.themes.font import (
-    FONT_WEIGHT_MEDIUM,
-    FONT_WEIGHT_SEMIBOLD,
-)
+from src.themes.color import COLORS
+from src.themes.font import FONTS
+from src.themes.radius import RADIUS
+from src.themes.spacing import SPACING as SPACE
+
+TRANSPARENT = COLORS["transparent"]
 
 ACTIVE_BAR_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "icons" / "active-bar.svg"
@@ -43,7 +45,7 @@ class MenuButton(QPushButton):
     # ----- Settings -----
     ICON_SIZE = 20
     ACTIVE_BAR_HEIGHT = 20
-    SPACING = 12
+    SPACING = SPACE[12]
     DURATION = 150
 
     def __init__(
@@ -58,7 +60,8 @@ class MenuButton(QPushButton):
         self.page = page
         self.icon_path = icon
         self.active = False
-        self.background_color = QColor("transparent")
+        self.hovered = False
+        self.background_color = QColor(TRANSPARENT)
 
         # ----- Button Setup -----
         self.setObjectName("menuButton")
@@ -72,10 +75,7 @@ class MenuButton(QPushButton):
 
         # ----- Icon -----
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(
-            self.ICON_SIZE,
-            self.ICON_SIZE,
-        )
+        self.icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
 
         # ----- Text -----
         self.text_label = QLabel(name)
@@ -97,7 +97,7 @@ class MenuButton(QPushButton):
 
         # ----- Button Layout -----
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 12, 12)
+        layout.setContentsMargins(SPACE[16], SPACE[12], SPACE[12], SPACE[12])
         layout.setSpacing(self.SPACING)
 
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
@@ -112,10 +112,7 @@ class MenuButton(QPushButton):
         # ----- Default State -----
         self.set_icon_color(MENU_TEXT)
 
-        self.set_text_style(
-            MENU_TEXT,
-            FONT_WEIGHT_MEDIUM,
-        )
+        self.set_text_style(MENU_TEXT, FONTS["weight"]["medium"])
 
         # ----- Hover Animation -----
         self.animation = QVariantAnimation(self)
@@ -132,32 +129,21 @@ class MenuButton(QPushButton):
         if not renderer.isValid():
             return
 
-        pixmap = QPixmap(
-            self.ICON_SIZE,
-            self.ICON_SIZE,
-        )
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
         # ----- Render SVG -----
         renderer.render(
             painter,
-            QRectF(
-                0,
-                0,
-                self.ICON_SIZE,
-                self.ICON_SIZE,
-            ),
+            QRectF(0, 0, self.ICON_SIZE, self.ICON_SIZE),
         )
 
         # ----- Recolor SVG -----
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
 
-        painter.fillRect(
-            pixmap.rect(),
-            QColor(color),
-        )
+        painter.fillRect(pixmap.rect(), QColor(color))
 
         painter.end()
 
@@ -177,22 +163,14 @@ class MenuButton(QPushButton):
 
         width = round(self.ACTIVE_BAR_HEIGHT * svg_size.width() / svg_size.height())
 
-        pixmap = QPixmap(
-            width,
-            self.ACTIVE_BAR_HEIGHT,
-        )
-        pixmap.fill(Qt.GlobalColor.transparent)
+        pixmap = QPixmap(width, self.ACTIVE_BAR_HEIGHT)
+        pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
 
         renderer.render(
             painter,
-            QRectF(
-                0,
-                0,
-                width,
-                self.ACTIVE_BAR_HEIGHT,
-            ),
+            QRectF(0, 0, width, self.ACTIVE_BAR_HEIGHT),
         )
 
         painter.end()
@@ -224,58 +202,66 @@ class MenuButton(QPushButton):
     # ----- Active State -----
     def set_active(self, active):
         self.active = active
+        self.hovered = False
 
         if active:
             self.active_bar_label.show()
-
             self.set_icon_color(MENU_TEXT_ACTIVE)
-
-            self.set_text_style(
-                MENU_TEXT_ACTIVE,
-                FONT_WEIGHT_SEMIBOLD,
-            )
-
+            self.set_text_style(MENU_TEXT_ACTIVE, FONTS["weight"]["semibold"])
             self.animate_background(MENU_BG_ACTIVE)
 
         else:
             self.active_bar_label.hide()
 
+            if self.underMouse():
+                self.set_hover(True)
+            else:
+                self.set_icon_color(MENU_TEXT)
+                self.set_text_style(MENU_TEXT, FONTS["weight"]["medium"])
+                self.animate_background(TRANSPARENT)
+
+    # ----- Hover State -----
+    def set_hover(self, hovered: bool):
+        if self.active or self.hovered == hovered:
+            return
+
+        self.hovered = hovered
+
+        if hovered:
+            self.set_icon_color(MENU_TEXT_HOVER)
+            self.set_text_style(MENU_TEXT_HOVER, FONTS["weight"]["semibold"])
+            self.animate_background(MENU_BG_HOVER)
+        else:
             self.set_icon_color(MENU_TEXT)
-
-            self.set_text_style(
-                MENU_TEXT,
-                FONT_WEIGHT_MEDIUM,
-            )
-
-            self.animate_background("transparent")
+            self.set_text_style(MENU_TEXT, FONTS["weight"]["medium"])
+            self.animate_background(TRANSPARENT)
 
     # ----- Hover Enter -----
     def enterEvent(self, event):
-        if not self.active:
-            self.set_icon_color(MENU_TEXT_HOVER)
-
-            self.set_text_style(
-                MENU_TEXT_HOVER,
-                FONT_WEIGHT_SEMIBOLD,
-            )
-
-            self.animate_background(MENU_BG_HOVER)
-
+        self.set_hover(True)
         super().enterEvent(event)
 
     # ----- Hover Leave -----
     def leaveEvent(self, event):
-        if not self.active:
-            self.set_icon_color(MENU_TEXT)
-
-            self.set_text_style(
-                MENU_TEXT,
-                FONT_WEIGHT_MEDIUM,
-            )
-
-            self.animate_background("transparent")
-
+        self.set_hover(False)
         super().leaveEvent(event)
+
+    # ----- Mouse Move -----
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            inside = self.rect().contains(event.position().toPoint())
+            self.set_hover(inside)
+
+    # ----- Mouse Release -----
+    def mouseReleaseEvent(self, event):
+        inside = self.rect().contains(event.position().toPoint())
+
+        super().mouseReleaseEvent(event)
+
+        if not self.active:
+            self.set_hover(inside)
 
     # ----- Draw Background -----
     def paintEvent(self, event):
@@ -287,11 +273,7 @@ class MenuButton(QPushButton):
 
         painter.setBrush(self.background_color)
 
-        painter.drawRoundedRect(
-            self.rect(),
-            8,
-            8,
-        )
+        painter.drawRoundedRect(self.rect(), RADIUS["medium"], RADIUS["medium"])
 
         painter.end()
 

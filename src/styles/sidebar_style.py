@@ -1,4 +1,8 @@
-from src.themes.color import SIDEBAR_BG
+from src.themes.color import COLORS
+
+# ----- Colors -----
+SIDEBAR_BG = COLORS["slate"][900]
+
 
 SIDEBAR_STYLE = f"""
 QWidget#sidebar {{

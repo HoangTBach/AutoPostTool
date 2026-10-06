@@ -10,10 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from src.app import App
 from src.configs.setting import APP_NAME
-from src.themes.font import (
-    FONT_FAMILY,
-    FONT_SIZE_14,
-)
+from src.themes.font import FONTS
 
 
 def main():
@@ -25,8 +22,8 @@ def main():
     for font_file in font_dir.glob("*.ttf"):
         QFontDatabase.addApplicationFont(str(font_file))
 
-    font = QFont(FONT_FAMILY)
-    font.setPixelSize(FONT_SIZE_14)
+    font = QFont(FONTS["family"]["primary"])
+    font.setPixelSize(FONTS["size"][14])
     app.setFont(font)
 
     # ----- Logo -----

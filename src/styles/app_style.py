@@ -1,9 +1,16 @@
-from src.themes.color import (
-    BG_COLOR,
-    BUTTON_COLORS,
-    BUTTON_WHITE,
-    TEXT_COLOR,
-)
+from src.themes.color import COLORS
+from src.themes.font import FONTS
+from src.themes.radius import RADIUS
+from src.themes.spacing import SPACING
+
+# ----- Colors -----
+TRANSPARENT = COLORS["transparent"]
+BG_COLOR = COLORS["slate"][50]
+TEXT_COLOR = COLORS["slate"][900]
+MESSAGE_BG = COLORS["neutral"]["white"]
+MESSAGE_BUTTON_BG = COLORS["blue"][600]
+MESSAGE_BUTTON_TEXT = COLORS["neutral"]["white"]
+
 
 APP_STYLE = f"""
 QMainWindow {{
@@ -12,27 +19,28 @@ QMainWindow {{
 
 QWidget {{
     color: {TEXT_COLOR};
+    font-family: "{FONTS["family"]["primary"]}";
 }}
 
 QMessageBox {{
-    background-color: {BUTTON_WHITE};
+    background-color: {MESSAGE_BG};
 }}
 
 QMessageBox QLabel {{
     color: {TEXT_COLOR};
-    background-color: transparent;
+    background-color: {TRANSPARENT};
 }}
 
 QMessageBox QPushButton {{
     min-width: 70px;
-    padding: 6px 16px;
-    color: {BUTTON_WHITE};
-    background-color: {BUTTON_COLORS["blue"]["base"]};
+    padding: {SPACING["legacy"][6]}px {SPACING[16]}px;
+    color: {MESSAGE_BUTTON_TEXT};
+    background-color: {MESSAGE_BUTTON_BG};
     border: none;
-    border-radius: 6px;
+    border-radius: {RADIUS["input"]}px;
 }}
 
 QMessageBox QPushButton:hover {{
-    background-color: {BUTTON_COLORS["blue"]["hover"]};
+    background-color: {MESSAGE_BUTTON_BG};
 }}
 """

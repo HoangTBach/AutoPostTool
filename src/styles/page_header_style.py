@@ -1,31 +1,31 @@
-from src.themes.color import (
-    PAGE_HEADER_TITLE,
-    PAGE_HEADER_SUBTITLE,
-    PAGE_HEADER_DIVIDER,
-)
+from src.themes.border import BORDERS
+from src.themes.color import COLORS
+from src.themes.font import FONTS
 
-from src.themes.font import (
-    FONT_SIZE_14,
-    FONT_SIZE_24,
-    FONT_WEIGHT_REGULAR,
-    FONT_WEIGHT_BOLD,
-)
+# ----- Colors -----
+PAGE_HEADER_TITLE = COLORS["slate"][900]
+PAGE_HEADER_SUBTITLE = COLORS["slate"][500]
+PAGE_HEADER_DIVIDER = COLORS["slate"][200]
+
+# ----- Border -----
+BORDER_WIDTH = BORDERS["width"]["default"]
+
 
 PAGE_HEADER_STYLE = f"""
 QLabel#pageHeaderTitle {{
     color: {PAGE_HEADER_TITLE};
-    font-size: {FONT_SIZE_24}px;
-    font-weight: {FONT_WEIGHT_BOLD};
+    font-size: {FONTS["size"][24]}px;
+    font-weight: {FONTS["weight"]["bold"]};
 }}
 
 QLabel#pageHeaderSubtitle {{
     color: {PAGE_HEADER_SUBTITLE};
-    font-size: {FONT_SIZE_14}px;
-    font-weight: {FONT_WEIGHT_REGULAR};
+    font-size: {FONTS["size"][14]}px;
+    font-weight: {FONTS["weight"]["regular"]};
 }}
 
 QFrame#pageHeaderDivider {{
     border: none;
-    border-top: 1px solid {PAGE_HEADER_DIVIDER};
+    border-top: {BORDER_WIDTH}px solid {PAGE_HEADER_DIVIDER};
 }}
 """

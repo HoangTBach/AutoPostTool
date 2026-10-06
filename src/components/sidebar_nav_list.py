@@ -6,12 +6,13 @@ from PySide6.QtWidgets import (
 
 from src.components.menu_button import MenuButton
 from src.configs.menu import MENU_ITEMS
+from src.themes.spacing import SPACING as SPACE
 
 
 class NavList(QWidget):
 
     # ----- Settings -----
-    SPACING = 4
+    SPACING = SPACE[4]
 
     # ----- Navigation Signal -----
     page_selected = Signal(str)
