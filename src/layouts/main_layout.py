@@ -19,7 +19,7 @@ class MainLayout(QWidget):
     MARGINS = (0, 0, 0, 0)
     SPACING = 0
 
-    DEFAULT_PAGE = "dashboard"
+    DEFAULT_PAGE = "page_auto"
 
     def __init__(self):
         super().__init__()

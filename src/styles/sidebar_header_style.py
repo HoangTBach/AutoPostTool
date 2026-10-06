@@ -1,25 +1,23 @@
-from src.themes.color import (
-    SIDEBAR_LOGO_TEXT,
-    SIDEBAR_LOGO_TEXT_MUTED,
-)
+from src.themes.color import COLORS
+from src.themes.font import FONTS
 
-from src.themes.font import (
-    FONT_SIZE_11,
-    FONT_SIZE_16,
-    FONT_WEIGHT_REGULAR,
-    FONT_WEIGHT_BOLD,
-)
+# ----- Colors -----
+SIDEBAR_LOGO_TEXT = COLORS["neutral"]["white"]
+SIDEBAR_LOGO_TEXT_MUTED = COLORS["slate"][400]
+
 
 SIDEBAR_HEADER_STYLE = f"""
 QLabel#sidebarAppName {{
     color: {SIDEBAR_LOGO_TEXT};
-    font-size: {FONT_SIZE_16}px;
-    font-weight: {FONT_WEIGHT_BOLD};
+
+    font-size: {FONTS["size"][16]}px;
+    font-weight: {FONTS["weight"]["bold"]};
 }}
 
 QLabel#sidebarAppMeta {{
     color: {SIDEBAR_LOGO_TEXT_MUTED};
-    font-size: {FONT_SIZE_11}px;
-    font-weight: {FONT_WEIGHT_REGULAR};
+
+    font-size: {FONTS["size"][11]}px;
+    font-weight: {FONTS["weight"]["regular"]};
 }}
 """

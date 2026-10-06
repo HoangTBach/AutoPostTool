@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractButton,
 )
 
-from src.themes.color import BUTTON_COLORS
+from src.themes.color import COLORS
 
 
 class ToggleSwitch(QAbstractButton):
@@ -23,7 +23,9 @@ class ToggleSwitch(QAbstractButton):
     MARGIN = 2
     DURATION = 160
 
-    OFF_COLOR = "#CBD5E1"
+    OFF_COLOR = COLORS["slate"][300]
+    ON_COLOR = COLORS["blue"][600]
+    KNOB_COLOR = COLORS["neutral"]["white"]
 
     def __init__(
         self,
@@ -83,7 +85,7 @@ class ToggleSwitch(QAbstractButton):
         # ----- Background -----
         off_color = QColor(self.OFF_COLOR)
 
-        on_color = QColor(BUTTON_COLORS["blue"]["base"])
+        on_color = QColor(self.ON_COLOR)
 
         background = self.mix_color(off_color, on_color, self._progress)
 
@@ -100,7 +102,7 @@ class ToggleSwitch(QAbstractButton):
 
         knob_x = start_x + (end_x - start_x) * self._progress
 
-        painter.setBrush(QColor("#FFFFFF"))
+        painter.setBrush(QColor(self.KNOB_COLOR))
 
         painter.drawEllipse(int(knob_x), self.MARGIN, knob_size, knob_size)
 

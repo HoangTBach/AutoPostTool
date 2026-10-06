@@ -1,29 +1,52 @@
-from src.themes.color import (
-    BUTTON_BORDER,
-    BUTTON_COLORS,
-    BUTTON_WHITE,
-)
+from src.themes.color import COLORS
+from src.themes.font import FONTS
+from src.themes.radius import RADIUS
 
-from src.themes.font import FONT_WEIGHT_SEMIBOLD
+# ----- Colors -----
+BUTTON_WHITE = COLORS["neutral"]["white"]
+BUTTON_BORDER = COLORS["slate"]["input_border"]
+
+BUTTON_COLORS = {
+    "blue": {
+        "base": COLORS["blue"][600],
+        "hover": COLORS["blue"][600],
+        "hover_bg": COLORS["blue"][50],
+    },
+    "green": {
+        "base": COLORS["emerald"][500],
+        "hover": COLORS["emerald"][500],
+        "hover_bg": COLORS["emerald"][50],
+    },
+    "red": {
+        "base": COLORS["red"][500],
+        "hover": COLORS["red"][600],
+        "hover_bg": COLORS["red"][50],
+    },
+    "gray": {
+        "base": COLORS["slate"][400],
+        "hover": COLORS["slate"][400],
+        "hover_bg": COLORS["slate"][50],
+    },
+}
+
 
 BUTTON_STYLE = f"""
 QPushButton#button {{
     background-color: transparent;
     border: 1px solid {BUTTON_BORDER};
-    border-radius: 8px;
+    border-radius: {RADIUS["medium"]}px;
 }}
 
 QLabel#buttonText {{
     background-color: transparent;
-    font-weight: {FONT_WEIGHT_SEMIBOLD};
+    font-size: {FONTS["size"][14]}px;
+    font-weight: {FONTS["weight"]["semibold"]};
 }}
 """
 
 
 for name, color in BUTTON_COLORS.items():
-
     BUTTON_STYLE += f"""
-
     /* ----- Outline ----- */
 
     QPushButton#button[variant="outline"][color="{name}"] {{
@@ -42,7 +65,6 @@ for name, color in BUTTON_COLORS.items():
     QPushButton#button[variant="primary"][color="{name}"] {{
         background-color: {color["base"]};
         border-color: {color["base"]};
-        color: {BUTTON_WHITE};
     }}
 
     QPushButton#button[variant="primary"][color="{name}"]:hover {{

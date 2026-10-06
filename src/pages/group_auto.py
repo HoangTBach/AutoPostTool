@@ -4,13 +4,14 @@ from PySide6.QtWidgets import (
 )
 
 from src.components.page_header import PageHeader
+from src.themes.spacing import SPACING as SPACE
 
 
 class GroupAutoPage(QWidget):
 
     # ----- Settings -----
-    MARGIN = (32, 32, 32, 32)
-    SPACING = 24
+    MARGIN = (SPACE[32], SPACE[32], SPACE[32], SPACE[32])
+    SPACING = SPACE[24]
 
     def __init__(self):
         super().__init__()

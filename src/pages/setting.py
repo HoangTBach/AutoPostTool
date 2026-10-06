@@ -17,6 +17,7 @@ from src.components.toggle_switch import ToggleSwitch
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
 from src.features.adspower.worker import AdsPowerCheckWorker
 from src.styles.setting_style import SETTING_STYLE
+from src.themes.spacing import SPACING as SPACE
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
@@ -24,14 +25,19 @@ ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 class SettingPage(QWidget):
 
     # ----- Settings -----
-    MARGIN = (32, 32, 32, 32)
-    SPACING = 20
+    MARGIN = (SPACE[32], SPACE[32], SPACE[32], SPACE[32])
+    SPACING = SPACE["legacy"][20]
 
-    CARD_MARGIN = (16, 14, 16, 14)
-    CARD_SPACING = 16
+    CARD_MARGIN = (
+        SPACE[16],
+        SPACE["legacy"][14],
+        SPACE[16],
+        SPACE["legacy"][14],
+    )
+    CARD_SPACING = SPACE[16]
 
-    FORM_SPACING = 8
-    BUTTON_SPACING = 8
+    FORM_SPACING = SPACE[8]
+    BUTTON_SPACING = SPACE[8]
 
     AUTO_RECONNECT_DEFAULT = False
     AUTO_RECONNECT_INTERVAL = 15000
@@ -75,7 +81,7 @@ class SettingPage(QWidget):
 
         title_layout = QVBoxLayout()
         title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(2)
+        title_layout.setSpacing(SPACE[2])
         title_layout.addWidget(title_label)
         title_layout.addWidget(subtitle_label)
 
@@ -116,7 +122,7 @@ class SettingPage(QWidget):
 
         # ----- API Key -----
         api_key_label = QLabel("API key")
-        api_key_label.setObjectName("settingLabel")
+        api_key_label.setObjectName("apiKeyLabel")
 
         self.api_key_input = Input(
             editable=True,
@@ -204,7 +210,7 @@ class SettingPage(QWidget):
             0,
             0,
         )
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(SPACE[12])
 
         content_layout.addWidget(card, 1)
         content_layout.addStretch(1)

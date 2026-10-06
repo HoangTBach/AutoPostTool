@@ -11,11 +11,12 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
-from src.styles.button_style import BUTTON_STYLE
-from src.themes.color import (
+from src.styles.button_style import (
     BUTTON_COLORS,
+    BUTTON_STYLE,
     BUTTON_WHITE,
 )
+from src.themes.spacing import SPACING as SPACE
 
 
 class ButtonIcon(QLabel):
@@ -45,8 +46,13 @@ class Button(QPushButton):
 
     # ----- Settings -----
     ICON_SIZE = 16
-    SPACING = 8
-    MARGIN = (16, 10, 16, 10)
+    SPACING = SPACE[8]
+    MARGIN = (
+        SPACE[16],
+        SPACE["legacy"][10],
+        SPACE[16],
+        SPACE["legacy"][10],
+    )
 
     def __init__(
         self,

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from src.components.input import Input
 from src.styles.table_style import TABLE_STYLE
+from src.themes.spacing import SPACING as SPACE
 
 
 class ElideLabel(QLabel):
@@ -111,18 +112,18 @@ class SmoothScrollArea(QScrollArea):
 class Table(QWidget):
 
     # ----- Settings -----
-    HEADER_MARGIN = (24, 8, 24, 8)
-    ROW_MARGIN = (24, 0, 24, 0)
+    HEADER_MARGIN = (SPACE[24], SPACE[8], SPACE[24], SPACE[8])
+    ROW_MARGIN = (SPACE[24], 0, SPACE[24], 0)
 
-    COLUMN_SPACING = 12
-    LIST_SPACING = 4
+    COLUMN_SPACING = SPACE[12]
+    LIST_SPACING = SPACE[4]
 
     DURATION = 180
     SCROLL_STEP = 120
 
     ROW_HEIGHT = 52
     LIST_ITEM_HEIGHT = 22
-    LIST_VERTICAL_PADDING = 16
+    LIST_VERTICAL_PADDING = SPACE[16]
 
     def __init__(
         self,

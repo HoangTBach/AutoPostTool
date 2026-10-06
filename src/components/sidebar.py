@@ -7,14 +7,15 @@ from PySide6.QtWidgets import (
 from src.components.sidebar_header import SidebarHeader
 from src.components.sidebar_nav_list import NavList
 from src.styles.sidebar_style import SIDEBAR_STYLE
+from src.themes.spacing import SPACING as SPACE
 
 
 class Sidebar(QWidget):
 
     # ----- Settings -----
     WIDTH = 260
-    MARGIN = (16, 24, 16, 24)
-    SPACING = 32
+    MARGIN = (SPACE[16], SPACE[24], SPACE[16], SPACE[24])
+    SPACING = SPACE[32]
 
     def __init__(self):
         super().__init__()

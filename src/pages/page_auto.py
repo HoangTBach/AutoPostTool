@@ -19,6 +19,7 @@ from src.features.page_posting.worker import (
     PageImportWorker,
 )
 from src.styles.page_auto_style import PAGE_AUTO_STYLE
+from src.themes.spacing import SPACING as SPACE
 from src.utils.file import open_directory
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
@@ -27,11 +28,11 @@ ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 class PageAutoPage(QWidget):
 
     # ----- Settings -----
-    MARGIN = (32, 32, 32, 32)
-    SPACING = 24
-    ACTION_SPACING = 8
-    STAT_SPACING = 12
-    CONTENT_SPACING = 20
+    MARGIN = (SPACE[32], SPACE[32], SPACE[32], SPACE[32])
+    SPACING = SPACE[24]
+    ACTION_SPACING = SPACE[8]
+    STAT_SPACING = SPACE[12]
+    CONTENT_SPACING = SPACE["legacy"][20]
 
     def __init__(self):
         super().__init__()
