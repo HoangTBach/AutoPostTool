@@ -2,10 +2,8 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
+from src.configs.path import DATA_FILE
 from src.features.page_posting.helper import clean_value, get_number
-
-ROOT_DIR = Path(__file__).resolve().parents[3]
-DATA_FILE = ROOT_DIR / "data" / "Databook.xlsx"
 
 
 # ----- File -----
