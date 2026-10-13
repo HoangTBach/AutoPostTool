@@ -7,6 +7,7 @@ from openpyxl import Workbook, load_workbook
 from src.configs.path import DOWNLOAD_DIR, RESULT_DIR
 
 RESULT_HEADERS = [
+    "_task_id",
     "post_order",
     "via_name",
     "page_name",
@@ -17,7 +18,6 @@ RESULT_HEADERS = [
     "published_at",
     "post_url",
     "error",
-    "_task_id",
 ]
 
 DEVLOG_HEADERS = [
@@ -33,7 +33,7 @@ DEVLOG_HEADERS = [
     "error_type",
     "error_message",
     "traceback",
-    "post_url",
+    "retryable",
 ]
 
 
@@ -172,6 +172,7 @@ class PageAutoReport:
                 comment = "No comment (skipped)"
 
             values = {
+                "_task_id": task_id,
                 "post_order": row.get("post_order"),
                 "via_name": row.get("via_name", ""),
                 "page_name": row.get("page", row.get("page_name", "")),
@@ -182,7 +183,6 @@ class PageAutoReport:
                 "published_at": published_at,
                 "post_url": post_url or "",
                 "error": error or "",
-                "_task_id": task_id,
             }
 
             for column, header in enumerate(headers, start=1):
@@ -209,7 +209,7 @@ class PageAutoReport:
         status: str,
         attempt: int = 0,
         error=None,
-        post_url="",
+        retryable: bool = False,
     ) -> None:
         error_type = type(error).__name__ if error else ""
         error_message = str(error) if error else ""
@@ -237,7 +237,7 @@ class PageAutoReport:
             error_type,
             error_message,
             trace,
-            post_url or "",
+            retryable,
         ]
 
         workbook = load_workbook(self.devlog_path)
