@@ -92,12 +92,7 @@ class PageAutoPage(QWidget):
         )
 
         action_layout = QHBoxLayout()
-        action_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(self.ACTION_SPACING)
 
         action_layout.addWidget(self.import_button)
@@ -146,33 +141,16 @@ class PageAutoPage(QWidget):
         )
 
         stat_layout = QHBoxLayout()
-        stat_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        stat_layout.setContentsMargins(0, 0, 0, 0)
         stat_layout.setSpacing(self.STAT_SPACING)
 
-        stat_layout.addWidget(
-            self.active_pages_card,
-            1,
-        )
+        stat_layout.addWidget(self.active_pages_card, 1)
 
-        stat_layout.addWidget(
-            self.published_card,
-            1,
-        )
+        stat_layout.addWidget(self.published_card, 1)
 
-        stat_layout.addWidget(
-            self.automation_card,
-            1,
-        )
+        stat_layout.addWidget(self.automation_card, 1)
 
-        stat_layout.addWidget(
-            self.failed_card,
-            1,
-        )
+        stat_layout.addWidget(self.failed_card, 1)
 
         # ----- Table -----
         self.table_card = TableCard(title="Page List")
@@ -186,12 +164,7 @@ class PageAutoPage(QWidget):
 
         content_layout = QVBoxLayout(content)
 
-        content_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        content_layout.setContentsMargins(0, 0, 0, 0)
 
         content_layout.setSpacing(self.CONTENT_SPACING)
 
@@ -199,10 +172,7 @@ class PageAutoPage(QWidget):
 
         content_layout.addLayout(stat_layout)
 
-        content_layout.addWidget(
-            self.table_card,
-            1,
-        )
+        content_layout.addWidget(self.table_card, 1)
 
         # ----- Layout -----
         layout = QVBoxLayout(self)
@@ -254,10 +224,7 @@ class PageAutoPage(QWidget):
             return
 
         old_status = {
-            row["task_id"]: row.get(
-                "status",
-                "",
-            )
+            row["task_id"]: row.get("status", "")
             for row in self.page_rows
             if row.get("task_id")
         }
@@ -378,7 +345,7 @@ class PageAutoPage(QWidget):
         self.run_worker = PageAutoWorker(self.page_jobs)
 
         self.run_worker.error.connect(self.handle_run_error)
-
+        self.run_worker.progress.connect(self.handle_run_progress)
         self.run_worker.finished.connect(self.clear_run_worker)
 
         self.running = True
@@ -396,6 +363,17 @@ class PageAutoPage(QWidget):
 
     def handle_run_error(self, error: str):
         QMessageBox.warning(self, "Page Auto", error)
+
+    def handle_run_progress(self, event: dict):
+        task_id = event.get("task_id")
+
+        for row in self.page_rows:
+            if row.get("task_id") == task_id:
+                row["status"] = event.get("ui_status", "")
+                row["error"] = event.get("error", "")
+                break
+
+        self.refresh_page()
 
     def clear_run_worker(self):
         if self.run_worker:

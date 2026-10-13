@@ -16,6 +16,10 @@ from src.components.page_header import PageHeader
 from src.components.toggle_switch import ToggleSwitch
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
 from src.features.adspower.worker import AdsPowerCheckWorker
+from src.features.page_posting.adspower import (
+    clear_credentials,
+    set_credentials,
+)
 from src.styles.setting_style import SETTING_STYLE
 from src.themes.spacing import SPACING as SPACE
 
@@ -248,7 +252,7 @@ class SettingPage(QWidget):
 
     # ----- Check -----
     def start_check(self, action: str):
-        if self.check_worker and self.check_worker.isRunning():
+        if self.check_worker is not None:
             return
 
         local_api = self.api_input.text().strip()
@@ -256,30 +260,18 @@ class SettingPage(QWidget):
 
         if not local_api:
             if action != "auto":
-                QMessageBox.warning(
-                    self,
-                    "AdsPower",
-                    "Local API is required.",
-                )
+                QMessageBox.warning(self, "AdsPower", "Local API is required.")
             return
 
         if not api_key:
             if action != "auto":
-                QMessageBox.warning(
-                    self,
-                    "AdsPower",
-                    "API key is required.",
-                )
+                QMessageBox.warning(self, "AdsPower", "API key is required.")
             return
 
         self.check_action = action
         self.set_connection_state("testing")
 
-        self.check_worker = AdsPowerCheckWorker(
-            local_api,
-            api_key,
-        )
-
+        self.check_worker = AdsPowerCheckWorker(local_api, api_key)
         self.check_worker.result.connect(self.handle_check_result)
         self.check_worker.finished.connect(self.clear_check_worker)
 
@@ -348,8 +340,8 @@ class SettingPage(QWidget):
         self.is_connected = True
 
         self.connected_local_api = self.api_input.text().strip()
-
         self.connected_api_key = self.api_key_input.text().strip()
+        set_credentials(self.connected_local_api, self.connected_api_key)
 
         self.set_connection_state("connected")
 
@@ -360,6 +352,7 @@ class SettingPage(QWidget):
         self.connected_api_key = ""
 
         self.set_connection_state("disconnected")
+        clear_credentials()
 
     # ----- Credentials -----
     def handle_credentials_changed(self):
@@ -387,18 +380,18 @@ class SettingPage(QWidget):
             self.reconnect_timer.stop()
 
     def auto_reconnect(self):
-        if self.check_worker and self.check_worker.isRunning():
+        if self.check_worker is not None:
             return
 
         self.start_check("auto")
 
     # ----- Actions -----
     def update_actions(self):
-        busy = self.check_worker is not None and self.check_worker.isRunning()
+        busy = self.check_worker is not None
         has_api_key = bool(self.api_key_input.text().strip())
 
+        self.api_key_input.setEnabled(not busy)
         self.test_button.setEnabled(not busy and has_api_key)
-
         self.connect_button.setEnabled(
             not busy and has_api_key and not self.is_connected
         )
