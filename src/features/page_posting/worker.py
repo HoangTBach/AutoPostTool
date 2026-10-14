@@ -19,6 +19,7 @@ from src.features.page_posting.excel import (
 )
 from src.features.page_posting.facebook import (
     PublishUnknownError,
+    get_published_post_url,
     post_comment,
     publish_photo,
 )
@@ -140,7 +141,8 @@ class PageAutoWorker(QThread):
                     return
 
                 if last_completed_order is not None and order > last_completed_order:
-                    self._wait_until(next_order_at)
+                    if not self._wait_until(next_order_at):
+                        return
 
                 if self.stop_requested:
                     return
@@ -148,6 +150,7 @@ class PageAutoWorker(QThread):
                 for job in grouped_jobs[order]:
                     if self.stop_requested:
                         return
+
                     self._run_job(job, report)
 
                 if self.stop_requested or not self._order_is_complete(
@@ -156,8 +159,9 @@ class PageAutoWorker(QThread):
                     return
 
                 if last_completed_order is None or order > last_completed_order:
+                    order_delay = max(0.0, float(PAGE_AUTO_ORDER_DELAY))
                     next_order_at = datetime.now().astimezone() + timedelta(
-                        minutes=PAGE_AUTO_ORDER_DELAY
+                        minutes=order_delay
                     )
 
                     report.set_state(
@@ -266,6 +270,11 @@ class PageAutoWorker(QThread):
 
             return
 
+        # ----- Delay before the next Page/job -----
+
+        if self._last_post_finished_at is not None and not self._wait_between_posts():
+            return
+
         try:
             profile_data = start_profile(profile_uid)
             report.log_event(
@@ -320,9 +329,15 @@ class PageAutoWorker(QThread):
                 )
 
             if driver is not None:
-                for row in valid_rows:
+                for index, row in enumerate(valid_rows):
                     if self.stop_requested:
                         break
+
+                    # ----- Delay between posts -----
+
+                    if index > 0 and not self._wait_between_posts():
+                        break
+
                     self._publish_row(driver, row, report)
                     self._last_post_finished_at = datetime.now().astimezone()
 
@@ -366,42 +381,49 @@ class PageAutoWorker(QThread):
 
     def _publish_row(self, driver, row: dict, report: PageAutoReport) -> None:
         attempt = report.next_attempt(row)
+        post_id = row.get("post_id", "")
+        caption = str(row.get("caption") or "").strip()
 
         report.upsert_result(row, "Running")
         self._emit(row, "Running")
         report.log_event(
             row,
             self.run_id,
-            f"publish:{row.get('post_id', '')}",
+            f"publish:{post_id}",
             "Running",
             attempt,
         )
 
+        # ----- Publish post first -----
         try:
-            post_url = publish_photo(driver, row)
+            publish_photo(driver, row)
+
         except PublishUnknownError as error:
             message = (
                 "Publish result could not be confirmed. "
                 "Check the Page before retrying."
             )
+
             report.upsert_result(row, "Unknown", error=message)
             report.log_event(
                 row,
                 self.run_id,
-                f"publish:{row.get('post_id', '')}",
+                f"publish:{post_id}",
                 "Unknown",
                 attempt,
                 error,
             )
             self._emit(row, "Unknown", message)
             return
+
         except Exception as error:
             message = "Failed to publish the post. See PageAuto_DevLog.xlsx."
+
             report.upsert_result(row, "Failed", error=message)
             report.log_event(
                 row,
                 self.run_id,
-                f"publish:{row.get('post_id', '')}",
+                f"publish:{post_id}",
                 "Failed",
                 attempt,
                 error,
@@ -410,47 +432,94 @@ class PageAutoWorker(QThread):
             return
 
         published_at = datetime.now().astimezone().replace(tzinfo=None)
-        comment = str(row.get("comment") or "").strip()
-        row_error = ""
+        comment = str(row.get("comment") or "")
+        comment_error = None
+        permalink_error = None
+        post_url = ""
 
-        if comment:
+        # ----- Post the whole comment before retrieving URL -----
+        if comment.strip():
             try:
-                post_comment(
-                    driver,
-                    str(row.get("caption") or "").strip(),
-                    comment,
-                )
+                post_comment(driver, caption, comment)
+            except Exception as error:
+                comment_error = error
+
+        # ----- Click timestamp and retrieve URL after comment attempt -----
+        try:
+            post_url = get_published_post_url(
+                driver,
+                caption,
+                attempts=2,
+            )
+
+            report.log_event(
+                row,
+                self.run_id,
+                f"permalink:{post_id}",
+                "Retrieved",
+                attempt,
+                post_url=post_url,
+            )
+
+        except Exception as error:
+            permalink_error = error
+
+            report.log_event(
+                row,
+                self.run_id,
+                f"permalink:{post_id}",
+                "Failed",
+                attempt,
+                error,
+            )
+
+        # ----- Log comment result after URL retrieval -----
+        row_errors = []
+
+        if comment.strip():
+            if comment_error is None:
                 report.log_event(
                     row,
                     self.run_id,
-                    f"comment:{row.get('post_id', '')}",
+                    f"comment:{post_id}",
                     "Published",
                     attempt,
                     post_url=post_url,
                 )
-            except Exception as error:
-                row_error = (
+            else:
+                message = (
                     "Post was published, but the comment could not be added. "
                     "See PageAuto_DevLog.xlsx."
                 )
+                row_errors.append(message)
+
                 report.log_event(
                     row,
                     self.run_id,
-                    f"comment:{row.get('post_id', '')}",
+                    f"comment:{post_id}",
                     "Failed",
                     attempt,
-                    error,
+                    comment_error,
                     post_url,
                 )
         else:
             report.log_event(
                 row,
                 self.run_id,
-                f"comment:{row.get('post_id', '')}",
+                f"comment:{post_id}",
                 "Skipped",
                 attempt,
                 post_url=post_url,
             )
+
+        # ----- Preserve Published status if permalink retrieval fails -----
+        if permalink_error is not None:
+            row_errors.append(
+                "Post was published, but its permalink could not be retrieved. "
+                "See PageAuto_DevLog.xlsx."
+            )
+
+        row_error = " ".join(row_errors)
 
         report.upsert_result(
             row,
@@ -459,9 +528,14 @@ class PageAutoWorker(QThread):
             post_url=post_url,
             error=row_error,
         )
+
         self._emit(row, "Done", row_error)
 
-    def _order_is_complete(self, jobs: list[dict], report: PageAutoReport) -> bool:
+    def _order_is_complete(
+        self,
+        jobs: list[dict],
+        report: PageAutoReport,
+    ) -> bool:
         for job in jobs:
             for row in job["rows"]:
                 status = report.get_result(row.get("task_id", "")).get("post_status")
@@ -475,23 +549,28 @@ class PageAutoWorker(QThread):
         if self._last_post_finished_at is None:
             return not self.stop_requested
 
-        next_post_at = self._last_post_finished_at + timedelta(
-            minutes=PAGE_AUTO_POST_DELAY
-        )
+        delay_minutes = max(0.0, float(PAGE_AUTO_POST_DELAY))
+        next_post_at = self._last_post_finished_at + timedelta(minutes=delay_minutes)
 
         return self._wait_until(next_post_at)
 
-    def _wait_until(self, due_at: datetime | None) -> None:
+    def _wait_until(self, due_at: datetime | None) -> bool:
+        if self.stop_requested:
+            return False
+
         if due_at is None:
-            return
+            return True
 
         while not self.stop_requested:
             now = datetime.now().astimezone()
 
             if now >= due_at:
-                return
+                return True
 
-            time.sleep(min(1.0, max(0.1, (due_at - now).total_seconds())))
+            remaining = (due_at - now).total_seconds()
+            time.sleep(min(1.0, max(0.1, remaining)))
+
+        return False
 
     def _emit(self, row: dict, ui_status: str, error: str = "") -> None:
         self.progress.emit(
