@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from selenium.common.exceptions import NoSuchWindowException, WebDriverException
 import time
 import uuid
 
@@ -18,9 +19,12 @@ from src.features.page_posting.excel import (
     load_page_rows,
 )
 from src.features.page_posting.facebook import (
+    POST_PUBLISH_WAIT_SECONDS,
+    POST_TIMESTAMP_CYCLES,
     PublishUnknownError,
-    get_published_post_url,
-    post_comment,
+    click_published_post_timestamp,
+    get_opened_post_url,
+    post_comment_on_opened_post,
     publish_photo,
 )
 from src.features.page_posting.report import PageAutoReport
@@ -220,7 +224,17 @@ class PageAutoWorker(QThread):
                 continue
 
             if status == "Unknown":
-                self._emit(row, "Unknown", result.get("error", ""))
+                if result.get("post_url") and result.get("published_at"):
+                    report.upsert_result(
+                        row,
+                        "Published",
+                        published_at=result["published_at"],
+                        post_url=result["post_url"],
+                        error=result.get("error", ""),
+                    )
+                    self._emit(row, "Done", result.get("error", ""))
+                else:
+                    self._emit(row, "Unknown", result.get("error", ""))
                 continue
 
             pending_rows.append(row)
@@ -269,8 +283,6 @@ class PageAutoWorker(QThread):
                 self._emit(row, "Error", message)
 
             return
-
-        # ----- Delay before the next Page/job -----
 
         if self._last_post_finished_at is not None and not self._wait_between_posts():
             return
@@ -333,18 +345,60 @@ class PageAutoWorker(QThread):
                     if self.stop_requested:
                         break
 
-                    # ----- Delay between posts -----
-
                     if index > 0 and not self._wait_between_posts():
                         break
 
-                    self._publish_row(driver, row, report)
+                    try:
+                        handles = driver.window_handles
+                        if not handles:
+                            raise NoSuchWindowException("No browser windows remain")
+                        try:
+                            driver.current_window_handle
+                        except NoSuchWindowException:
+                            driver.switch_to.window(handles[0])
+                        page_handle = driver.current_window_handle
+                    except WebDriverException as error:
+                        report.log_event(
+                            row, self.run_id, "browser:lost", "Failed", error=error
+                        )
+                        report.upsert_result(
+                            row,
+                            "Failed",
+                            error="Browser window lost before publishing; not attempted.",
+                        )
+                        self._emit(
+                            row,
+                            "Error",
+                            "Browser window lost; stopping Via to avoid duplicate posts.",
+                        )
+                        break
+
+                    try:
+                        self._publish_row(driver, row, report)
+                    finally:
+                        try:
+                            remaining = driver.window_handles
+                            if page_handle in remaining:
+                                for handle in remaining:
+                                    if handle != page_handle and handle not in handles:
+                                        driver.switch_to.window(handle)
+                                        driver.close()
+                                driver.switch_to.window(page_handle)
+                            elif remaining:
+                                driver.switch_to.window(remaining[0])
+                            else:
+                                pass
+                        except WebDriverException as error:
+                            pass
                     self._last_post_finished_at = datetime.now().astimezone()
 
         finally:
             if driver is not None:
                 try:
                     driver.quit()
+                    report.log_event(
+                        valid_rows[0], self.run_id, "browser:close", "Stopped"
+                    )
                 except Exception as error:
                     report.log_event(
                         valid_rows[0],
@@ -353,28 +407,17 @@ class PageAutoWorker(QThread):
                         "Failed",
                         error=error,
                     )
-
             try:
                 stop_profile(profile_uid)
-                report.log_event(
-                    valid_rows[0],
-                    self.run_id,
-                    "profile:stop",
-                    "Stopped",
-                )
+                report.log_event(valid_rows[0], self.run_id, "profile:stop", "Stopped")
             except Exception as error:
                 report.log_event(
-                    valid_rows[0],
-                    self.run_id,
-                    "profile:stop",
-                    "Failed",
-                    error=error,
+                    valid_rows[0], self.run_id, "profile:stop", "Failed", error=error
                 )
-                fatal_error = _FatalAutomationError(
-                    str(error),
-                    "Could not stop the AdsPower profile. "
-                    "Check PageAuto_DevLog.xlsx.",
-                )
+                if fatal_error is None:
+                    fatal_error = _FatalAutomationError(
+                        str(error), "Could not stop AdsPower profile; check DevLog."
+                    )
 
         if fatal_error:
             raise fatal_error
@@ -394,7 +437,6 @@ class PageAutoWorker(QThread):
             attempt,
         )
 
-        # ----- Publish post first -----
         try:
             publish_photo(driver, row)
 
@@ -432,104 +474,64 @@ class PageAutoWorker(QThread):
             return
 
         published_at = datetime.now().astimezone().replace(tzinfo=None)
-        comment = str(row.get("comment") or "")
-        comment_error = None
-        permalink_error = None
+        time.sleep(POST_PUBLISH_WAIT_SECONDS)
         post_url = ""
-
-        # ----- Post the whole comment before retrieving URL -----
-        if comment.strip():
-            try:
-                post_comment(driver, caption, comment)
-            except Exception as error:
-                comment_error = error
-
-        # ----- Click timestamp and retrieve URL after comment attempt -----
         try:
-            post_url = get_published_post_url(
+            click_published_post_timestamp(
                 driver,
                 caption,
-                attempts=2,
+                attempts=POST_TIMESTAMP_CYCLES,
+                page_link=str(row.get("page_link") or "").strip(),
             )
-
-            report.log_event(
-                row,
-                self.run_id,
-                f"permalink:{post_id}",
-                "Retrieved",
-                attempt,
-                post_url=post_url,
-            )
-
-        except Exception as error:
-            permalink_error = error
-
-            report.log_event(
-                row,
-                self.run_id,
-                f"permalink:{post_id}",
-                "Failed",
-                attempt,
-                error,
-            )
-
-        # ----- Log comment result after URL retrieval -----
-        row_errors = []
-
-        if comment.strip():
-            if comment_error is None:
-                report.log_event(
-                    row,
-                    self.run_id,
-                    f"comment:{post_id}",
-                    "Published",
-                    attempt,
-                    post_url=post_url,
-                )
+            post_url = get_opened_post_url(driver)
+            comment = str(row.get("comment") or "").strip()
+            comment_error = ""
+            if comment:
+                try:
+                    confirmed = post_comment_on_opened_post(driver, comment)
+                    comment_status = "Published" if confirmed else "Unknown"
+                    if not confirmed:
+                        comment_error = "Comment sent once but not visually confirmed; do not resend."
+                    report.log_event(
+                        row, self.run_id, f"comment:{post_id}", comment_status, attempt
+                    )
+                except Exception as error:
+                    comment_error = f"Comment needs manual verification: {error}"
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"comment:{post_id}",
+                        "Unknown",
+                        attempt,
+                        error,
+                    )
             else:
-                message = (
-                    "Post was published, but the comment could not be added. "
-                    "See PageAuto_DevLog.xlsx."
-                )
-                row_errors.append(message)
-
                 report.log_event(
-                    row,
-                    self.run_id,
-                    f"comment:{post_id}",
-                    "Failed",
-                    attempt,
-                    comment_error,
-                    post_url,
+                    row, self.run_id, f"comment:{post_id}", "Skipped", attempt
                 )
-        else:
-            report.log_event(
+            report.log_event(row, self.run_id, f"url:{post_id}", "Captured", attempt)
+            report.upsert_result(
                 row,
-                self.run_id,
-                f"comment:{post_id}",
-                "Skipped",
-                attempt,
+                "Published",
+                published_at=published_at,
                 post_url=post_url,
+                error=comment_error,
             )
-
-        # ----- Preserve Published status if permalink retrieval fails -----
-        if permalink_error is not None:
-            row_errors.append(
-                "Post was published, but its permalink could not be retrieved. "
-                "See PageAuto_DevLog.xlsx."
+            self._emit(row, "Done", comment_error)
+        except Exception as error:
+            report.log_event(
+                row, self.run_id, f"postprocess:{post_id}", "Unknown", attempt, error
             )
-
-        row_error = " ".join(row_errors)
-
-        report.upsert_result(
-            row,
-            "Published",
-            published_at=published_at,
-            post_url=post_url,
-            error=row_error,
-        )
-
-        self._emit(row, "Done", row_error)
+            status = "Published" if post_url else "Unknown"
+            message = f"Post-processing needs inspection: {error}"
+            report.upsert_result(
+                row,
+                status,
+                published_at=published_at,
+                post_url=post_url,
+                error=message,
+            )
+            self._emit(row, "Done" if status == "Published" else "Unknown", message)
 
     def _order_is_complete(
         self,

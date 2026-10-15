@@ -67,10 +67,7 @@ class StatCard(Card):
         # ----- Icon -----
         self.icon_box = QLabel()
 
-        self.icon_box.setFixedSize(
-            self.ICON_BOX_SIZE,
-            self.ICON_BOX_SIZE,
-        )
+        self.icon_box.setFixedSize(self.ICON_BOX_SIZE, self.ICON_BOX_SIZE)
 
         self.icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -79,11 +76,7 @@ class StatCard(Card):
             border-radius: {RADIUS["icon"]}px;
             """)
 
-        self.set_svg_icon(
-            self.icon_box,
-            icon,
-            stat_color["base"],
-        )
+        self.set_svg_icon(self.icon_box, icon, stat_color["base"])
 
         # ----- Title -----
         self.title_label = QLabel(title)
@@ -99,12 +92,7 @@ class StatCard(Card):
 
         # ----- Text Layout -----
         text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(self.TEXT_SPACING)
 
         text_layout.addWidget(self.title_label)
@@ -116,11 +104,7 @@ class StatCard(Card):
         layout.setContentsMargins(*self.MARGIN)
         layout.setSpacing(self.SPACING)
 
-        layout.addWidget(
-            self.icon_box,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
+        layout.addWidget(self.icon_box, 0, Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(text_layout)
 
@@ -218,27 +202,16 @@ class TableCard(Card):
         # ----- Card Layout -----
         layout = QVBoxLayout(self)
 
-        layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.setSpacing(self.SPACING)
 
         layout.addWidget(self.header)
 
-        layout.addWidget(
-            self.body,
-            1,
-        )
+        layout.addWidget(self.body, 1)
 
     # ----- Set Table -----
-    def set_table(
-        self,
-        table: QWidget,
-    ):
+    def set_table(self, table: QWidget):
         if self.table is not None:
             self.body_layout.removeWidget(self.table)
 
@@ -246,7 +219,4 @@ class TableCard(Card):
 
         self.table = table
 
-        self.body_layout.addWidget(
-            self.table,
-            1,
-        )
+        self.body_layout.addWidget(self.table, 1)

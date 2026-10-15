@@ -1,7 +1,9 @@
+from pathlib import Path
 import re
 import time
-from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import (
+    parse_qs,
+)
 
 from selenium.common.exceptions import StaleElementReferenceException, TimeoutException
 from selenium.webdriver.common.by import By
@@ -9,35 +11,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
 
-# ----- Exceptions -----
+# ----- Constants and Timeouts -----
+POST_BUTTON_TIMEOUT = 60  # seconds
+POST_PUBLISH_WAIT_SECONDS = 10  # seconds
+POST_TIMESTAMP_CYCLES = 3  # attempts
 
-
-class FacebookPostError(RuntimeError):
-    pass
-
-
-class PublishUnknownError(FacebookPostError):
-    pass
-
-
-class CommentPostError(RuntimeError):
-    pass
-
-
-# ----- Labels and selectors -----
-
-PHOTO_ACTIONS = {
-    "photo/video",
-    "photo / video",
-    "photos/videos",
-    "add photos/videos",
-    "add photo/video",
-    "photos and videos",
-    "photo and video",
-    "ảnh/video",
-    "ảnh và video",
-}
-
+# ----- Facebook Action Labels -----
 POST_ACTIONS = {"post", "publish", "share", "đăng", "chia sẻ"}
 
 NEXT_ACTIONS = {
@@ -47,13 +26,6 @@ NEXT_ACTIONS = {
     "tiếp",
     "tiếp theo",
     "tiếp tục",
-}
-
-COMMENT_ACTIONS = {
-    "comment",
-    "send",
-    "bình luận",
-    "gửi",
 }
 
 SEE_ALL_PROFILES_ACTIONS = {
@@ -82,574 +54,34 @@ _ACTION_SELECTOR = (
     "a[role='button'], [tabindex='0']"
 )
 
-_PHOTO_ACTION_SELECTOR = _ACTION_SELECTOR + ", [aria-label]"
 _POPUP_SELECTOR = "[role='menu'], [role='dialog'], [role='listbox']"
 
-POST_BUTTON_TIMEOUT = 60
+
+# ----- Custom Exceptions -----
+class FacebookPostError(RuntimeError):
+    pass
 
 
-# ----- General DOM helpers -----
+class PublishUnknownError(FacebookPostError):
+    pass
 
 
+class CommentPostError(RuntimeError):
+    pass
+
+
+# ----- Text Normalization -----
 def _normalise(value: str) -> str:
     return " ".join((value or "").casefold().split())
 
 
-# ----- Normalize Caption for Matching -----
 def _caption_key(value: str) -> str:
     value = (value or "").casefold()
     value = re.sub(r"[^\w\s]", " ", value)
     return " ".join(value.split())
 
 
-# ----- Canonicalize Facebook Post URL -----
-def _canonical_post_url(href: str) -> str:
-    href = str(href or "").strip()
-
-    if not href:
-        return ""
-
-    if href.startswith("//"):
-        href = "https:" + href
-    elif href.startswith("/"):
-        href = "https://www.facebook.com" + href
-
-    try:
-        parts = urlsplit(href)
-    except ValueError:
-        return ""
-
-    host = (parts.hostname or "").casefold()
-
-    if host != "facebook.com" and not host.endswith(".facebook.com"):
-        return ""
-
-    path = re.sub(r"/{2,}", "/", parts.path or "/").rstrip("/") or "/"
-    lower_path = path.casefold()
-
-    # Không dùng link ảnh làm permalink của bài viết.
-    if lower_path in {"/photo.php", "/photo", "/photos.php"} or lower_path.startswith(
-        ("/photo/", "/photos/")
-    ):
-        return ""
-
-    # Bài viết, Reel và video.
-    if re.fullmatch(
-        r"/(?:[^/?#]+/)*(?:reel|reels|video|videos|posts)/[^/?#]+",
-        path,
-        re.IGNORECASE,
-    ):
-        return f"https://www.facebook.com{path}"
-
-    # Link chia sẻ bài viết/video.
-    if re.fullmatch(r"/share/[prv]/[^/?#]+", path, re.IGNORECASE):
-        return f"https://www.facebook.com{path}"
-
-    # Link permalink kiểu cũ.
-    if lower_path in {"/permalink.php", "/story.php"}:
-        query = parse_qs(parts.query)
-        story_fbid = next(iter(query.get("story_fbid", [])), "")
-        page_id = next(iter(query.get("id", [])), "")
-
-        if story_fbid and page_id:
-            params = urlencode(
-                [
-                    ("story_fbid", story_fbid),
-                    ("id", page_id),
-                ]
-            )
-            return f"https://www.facebook.com/permalink.php?{params}"
-
-    # Video Watch.
-    if lower_path == "/watch":
-        video_id = next(iter(parse_qs(parts.query).get("v", [])), "")
-
-        if video_id:
-            return f"https://www.facebook.com/watch/?{urlencode([('v', video_id)])}"
-
-    return ""
-
-
-# ----- Find Post Timestamp Link -----
-def _find_post_timestamp_link(article):
-    if article is None:
-        return None
-
-    relative_time = re.compile(
-        r"\b\d+\s*(?:s|sec|secs|second|seconds|m|min|mins|minute|minutes|"
-        r"h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|"
-        r"mo|mos|month|months|y|yr|yrs|year|years|"
-        r"giây|phút|giờ|ngày|tuần|tháng|năm)\b",
-        re.IGNORECASE,
-    )
-
-    date_label = re.compile(
-        r"\b(?:just now|yesterday|today|hôm nay|hôm qua|vừa xong|"
-        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
-        r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
-        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
-        re.IGNORECASE,
-    )
-
-    try:
-        links = article.find_elements(By.CSS_SELECTOR, "a[href]")
-    except StaleElementReferenceException:
-        return None
-
-    timestamp_candidates = []
-    permalink_candidates = []
-    unverified_timestamp_candidates = []
-
-    for index, link in enumerate(links):
-        try:
-            if not _visible(link):
-                continue
-
-            href = (link.get_attribute("href") or "").strip()
-
-            if not href:
-                continue
-
-            text = _normalise(link.text)
-            aria = _normalise(link.get_attribute("aria-label") or "")
-            title = _normalise(link.get_attribute("title") or "")
-
-            try:
-                time_nodes = link.find_elements(
-                    By.CSS_SELECTOR,
-                    "time, abbr, [data-utime]",
-                )
-                label_nodes = link.find_elements(
-                    By.CSS_SELECTOR,
-                    "[title], [aria-label]",
-                )
-            except StaleElementReferenceException:
-                continue
-
-            nested_labels = []
-
-            for node in label_nodes:
-                try:
-                    nested_labels.extend(
-                        [
-                            _normalise(node.get_attribute("aria-label") or ""),
-                            _normalise(node.get_attribute("title") or ""),
-                            _normalise(node.text or ""),
-                        ]
-                    )
-                except StaleElementReferenceException:
-                    continue
-
-            label = " ".join(
-                value for value in [text, aria, title, *nested_labels] if value
-            )
-
-            if text in {
-                "like",
-                "comment",
-                "share",
-                "thích",
-                "bình luận",
-                "chia sẻ",
-            }:
-                continue
-
-            has_timestamp = (
-                bool(time_nodes)
-                or bool(relative_time.search(label))
-                or bool(date_label.search(label))
-                or "nội dung thời gian" in label
-                or "timestamp" in label
-            )
-
-            canonical_url = _canonical_post_url(href)
-
-            if canonical_url:
-                permalink_candidates.append((index, link))
-
-                if has_timestamp:
-                    score = 0
-
-                    if "nội dung thời gian" in label or "timestamp" in label:
-                        score += 100
-
-                    if time_nodes:
-                        score += 80
-
-                    if relative_time.search(label):
-                        score += 60
-
-                    if date_label.search(label):
-                        score += 40
-
-                    timestamp_candidates.append((score, index, link))
-
-            elif has_timestamp:
-                # Chỉ dùng khi Facebook không cung cấp permalink hợp lệ
-                # trong các link của bài viết. URL sau khi click vẫn phải
-                # được kiểm tra, không tự động lưu photo.php.
-                score = 0
-
-                if "nội dung thời gian" in label or "timestamp" in label:
-                    score += 100
-
-                if time_nodes:
-                    score += 80
-
-                if relative_time.search(label):
-                    score += 60
-
-                if date_label.search(label):
-                    score += 40
-
-                unverified_timestamp_candidates.append((score, index, link))
-
-        except StaleElementReferenceException:
-            continue
-
-    # Ưu tiên link vừa có dấu hiệu thời gian vừa là permalink hợp lệ.
-    if timestamp_candidates:
-        timestamp_candidates.sort(key=lambda item: (-item[0], item[1]))
-        print("[DEBUG post] Found timestamp permalink.")
-        return timestamp_candidates[0][2]
-
-    # Nếu Facebook không cung cấp nhãn thời gian rõ ràng,
-    # lấy permalink hợp lệ đầu tiên trong bài viết.
-    if permalink_candidates:
-        permalink_candidates.sort(key=lambda item: item[0])
-        print("[DEBUG post] Timestamp label unavailable; using post permalink link.")
-        return permalink_candidates[0][1]
-
-    # Trường hợp nhãn thời gian có tồn tại nhưng href chưa nhận diện được.
-    # Hàm lấy URL thực tế sau khi click và sẽ từ chối URL ảnh nếu vẫn sai.
-    if unverified_timestamp_candidates:
-        unverified_timestamp_candidates.sort(key=lambda item: (-item[0], item[1]))
-        print(
-            "[DEBUG post] Found timestamp element without a recognized "
-            "permalink. Will inspect the URL after clicking."
-        )
-        return unverified_timestamp_candidates[0][2]
-
-    debug_links = []
-
-    for link in links[:12]:
-        try:
-            debug_links.append(
-                {
-                    "text": (link.text or "")[:50],
-                    "aria": link.get_attribute("aria-label"),
-                    "href": link.get_attribute("href"),
-                }
-            )
-        except StaleElementReferenceException:
-            continue
-
-    print(
-        "[DEBUG post] No valid post timestamp link found. "
-        f"Available links: {debug_links}"
-    )
-    return None
-
-
-# ----- Clean Post Permalink -----
-def _clean_post_permalink(url: str) -> str:
-    url = str(url or "").strip()
-
-    if not url:
-        return ""
-
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return ""
-
-    host = (parts.hostname or "").casefold()
-
-    if host != "facebook.com" and not host.endswith(".facebook.com"):
-        return ""
-
-    path = re.sub(r"/{2,}", "/", parts.path or "/").rstrip("/") or "/"
-    path_lower = path.casefold()
-    query_items = parse_qsl(parts.query, keep_blank_values=False)
-
-    if path_lower.endswith("/permalink.php"):
-        allowed = {"story_fbid", "id"}
-    elif path_lower.endswith("/photo.php") or path_lower == "/photo":
-        allowed = {"fbid", "id", "set"}
-    elif path_lower == "/watch":
-        allowed = {"v"}
-    else:
-        allowed = set()
-
-    clean_query = urlencode(
-        [(key, value) for key, value in query_items if key in allowed]
-    )
-
-    return urlunsplit(("https", "www.facebook.com", path, clean_query, ""))
-
-
-# ----- Open Post Detail and Retrieve URL -----
-def _reload_and_find_post_url(
-    driver,
-    caption: str,
-    attempts: int = 2,
-) -> str:
-    before_post_url = _clean_post_permalink(driver.current_url)
-
-    for attempt in range(1, attempts + 1):
-        article = _find_post_article(driver, caption, timeout=15)
-
-        if article is None:
-            if attempt >= attempts:
-                break
-
-            print(
-                f"[DEBUG post] Post not found, attempt {attempt}/{attempts}. "
-                "Refreshing the Page."
-            )
-
-            time.sleep(3)
-
-            try:
-                driver.refresh()
-                _wait_for_page_ready(driver, timeout=30)
-            except TimeoutException:
-                print("[DEBUG post] Page refresh timed out.")
-                continue
-
-            _check_facebook_session(driver)
-
-            try:
-                _dismiss_call_now_popup(driver, timeout=3)
-            except Exception:
-                pass
-
-            continue
-
-        print("[DEBUG post] Article found. Looking for timestamp link.")
-
-        timestamp_link = _find_post_timestamp_link(article)
-
-        if timestamp_link is None:
-            print("[DEBUG post] Timestamp link not found. Waiting and retrying.")
-            time.sleep(2)
-
-            article = _find_post_article(driver, caption, timeout=5)
-
-            if article is not None:
-                timestamp_link = _find_post_timestamp_link(article)
-
-        if timestamp_link is None:
-            if attempt < attempts:
-                continue
-
-            raise PublishUnknownError(
-                "The post was found, but its timestamp link could not be located."
-            )
-
-        try:
-            previous_url = driver.current_url
-            previous_handles = set(driver.window_handles)
-
-            # Bắt buộc click timestamp trước khi đọc URL.
-            _click(timestamp_link, driver)
-
-            try:
-                WebDriverWait(
-                    driver,
-                    12,
-                    poll_frequency=0.3,
-                ).until(
-                    lambda current: (
-                        current.current_url != previous_url
-                        or len(current.window_handles) > len(previous_handles)
-                    )
-                )
-            except TimeoutException as error:
-                raise PublishUnknownError(
-                    "The timestamp was clicked, but Facebook did not navigate "
-                    "to the post permalink."
-                ) from error
-
-            new_handles = set(driver.window_handles) - previous_handles
-
-            if new_handles:
-                driver.switch_to.window(next(iter(new_handles)))
-
-            try:
-                _wait_for_page_ready(driver, timeout=30)
-            except TimeoutException:
-                print("[DEBUG post] Post detail page readiness timed out.")
-
-            # Chỉ lấy URL sau khi click timestamp và điều hướng.
-            post_url = _clean_post_permalink(driver.current_url)
-
-            if not post_url:
-                raise PublishUnknownError(
-                    "Facebook navigated to a URL that could not be recognized "
-                    "as a Facebook permalink."
-                )
-
-            if post_url == before_post_url:
-                raise PublishUnknownError(
-                    "The browser URL did not change to the post permalink."
-                )
-
-            print(f"[DEBUG post] Retrieved permalink after timestamp click: {post_url}")
-            return post_url
-
-        except StaleElementReferenceException as error:
-            raise PublishUnknownError(
-                "The post changed while clicking its timestamp. "
-                "The permalink could not be retrieved."
-            ) from error
-
-    raise PublishUnknownError(
-        "The published post could not be found after waiting and refreshing. "
-        "Check the Page before retrying to avoid publishing a duplicate."
-    )
-
-
-# ----- Public Function to Retrieve Post URL -----
-def get_published_post_url(
-    driver,
-    caption: str,
-    attempts: int = 2,
-) -> str:
-    return _reload_and_find_post_url(driver, caption, attempts)
-
-
-# ----- Open Post Detail and Retrieve URL -----
-def _reload_and_find_post_url(
-    driver,
-    caption: str,
-    attempts: int = 2,
-) -> str:
-    before_post_url = _clean_post_permalink(driver.current_url)
-
-    for attempt in range(1, attempts + 1):
-        article = _find_post_article(driver, caption, timeout=15)
-
-        if article is None:
-            if attempt >= attempts:
-                break
-
-            print(
-                f"[DEBUG post] Post not found, attempt {attempt}/{attempts}. "
-                "Refreshing the Page."
-            )
-
-            time.sleep(3)
-
-            try:
-                driver.refresh()
-                _wait_for_page_ready(driver, timeout=30)
-            except TimeoutException:
-                print("[DEBUG post] Page refresh timed out.")
-                continue
-
-            _check_facebook_session(driver)
-
-            try:
-                _dismiss_call_now_popup(driver, timeout=3)
-            except Exception:
-                pass
-
-            continue
-
-        print("[DEBUG post] Article found. Looking for timestamp link.")
-
-        timestamp_link = _find_post_timestamp_link(article)
-
-        if timestamp_link is None:
-            print("[DEBUG post] Timestamp link not found. Waiting and retrying.")
-            time.sleep(2)
-
-            article = _find_post_article(driver, caption, timeout=5)
-
-            if article is not None:
-                timestamp_link = _find_post_timestamp_link(article)
-
-        if timestamp_link is None:
-            if attempt < attempts:
-                continue
-
-            raise PublishUnknownError(
-                "The post was found, but its timestamp link could not be located."
-            )
-
-        try:
-            previous_url = driver.current_url
-            previous_handles = set(driver.window_handles)
-
-            # Bắt buộc click timestamp trước khi đọc URL.
-            _click(timestamp_link, driver)
-
-            try:
-                WebDriverWait(
-                    driver,
-                    12,
-                    poll_frequency=0.3,
-                ).until(
-                    lambda current: (
-                        current.current_url != previous_url
-                        or len(current.window_handles) > len(previous_handles)
-                    )
-                )
-            except TimeoutException as error:
-                raise PublishUnknownError(
-                    "The timestamp was clicked, but Facebook did not navigate "
-                    "to the post permalink."
-                ) from error
-
-            new_handles = set(driver.window_handles) - previous_handles
-
-            if new_handles:
-                driver.switch_to.window(next(iter(new_handles)))
-
-            try:
-                _wait_for_page_ready(driver, timeout=30)
-            except TimeoutException:
-                print("[DEBUG post] Post detail page readiness timed out.")
-
-            # Chỉ lấy URL sau khi click timestamp và điều hướng.
-            post_url = _clean_post_permalink(driver.current_url)
-
-            if not post_url:
-                raise PublishUnknownError(
-                    "Facebook navigated to a URL that could not be recognized "
-                    "as a Facebook permalink."
-                )
-
-            if post_url == before_post_url:
-                raise PublishUnknownError(
-                    "The browser URL did not change to the post permalink."
-                )
-
-            print(f"[DEBUG post] Retrieved permalink after timestamp click: {post_url}")
-            return post_url
-
-        except StaleElementReferenceException as error:
-            raise PublishUnknownError(
-                "The post changed while clicking its timestamp. "
-                "The permalink could not be retrieved."
-            ) from error
-
-    raise PublishUnknownError(
-        "The published post could not be found after waiting and refreshing. "
-        "Check the Page before retrying to avoid publishing a duplicate."
-    )
-
-
-# ----- Public Function to Retrieve Post URL -----
-def get_published_post_url(
-    driver,
-    caption: str,
-    attempts: int = 2,
-) -> str:
-    return _reload_and_find_post_url(driver, caption, attempts)
-
-
+# ----- Element Visibility and Click Helpers -----
 def _visible(element) -> bool:
     try:
         return element.is_displayed()
@@ -684,6 +116,7 @@ def _click_once(element, driver) -> None:
     element.click()
 
 
+# ----- DOM Action Finder -----
 def _dom_find_action(driver, labels: set[str], root=None, exact: bool = False):
     return driver.execute_script(
         r"""
@@ -747,7 +180,7 @@ def _dom_find_action(driver, labels: set[str], root=None, exact: bool = False):
     )
 
 
-# ----- Switch Facebook Page -----
+# ----- Facebook Account Menu -----
 def _find_account_menu(driver):
     return driver.execute_script(r"""
         const visible = element => {
@@ -874,6 +307,7 @@ def _find_page_option(driver, page_name: str, popup):
     )
 
 
+# ----- Facebook Session and Page Switching -----
 def _wait_for_page_ready(driver, timeout: int = 30) -> None:
     WebDriverWait(driver, timeout).until(
         lambda current: current.execute_script("return document.readyState")
@@ -998,7 +432,7 @@ def switch_to_page(driver, page_name: str) -> None:
     _check_facebook_session(driver)
 
 
-# ----- Open post composer -----
+# ----- Post Composer Detection -----
 def _visible_dialog(driver):
     return driver.execute_script(r"""
         const visible = element => {
@@ -1176,7 +610,7 @@ def _find_composer_trigger(driver):
         """)
 
 
-# ----- Import media -----
+# ----- Media Upload and Caption Editor -----
 def _find_file_input(driver, dialog, timeout: int = 15):
     def locate(current):
         roots = [dialog, _visible_dialog(current), current]
@@ -1201,7 +635,6 @@ def _find_file_input(driver, dialog, timeout: int = 15):
     return WebDriverWait(driver, timeout).until(locate)
 
 
-# ----- Enter caption -----
 def _find_caption_box(dialog):
     candidates = dialog.find_elements(
         By.CSS_SELECTOR,
@@ -1232,454 +665,66 @@ def _find_caption_box(dialog):
     return candidates[0]
 
 
-# ----- Find published post -----
+# ----- Published Post Detection -----
 def _find_post_article(driver, caption: str, timeout: int = 15):
-    words = _caption_key(caption).split()
-    snippet = " ".join(words[:8])
-
+    snippet = " ".join(_caption_key(caption).split()[:12])
     if not snippet:
         return None
 
     def locate(current):
-        try:
-            # First try Facebook's native article container.
-            articles = current.find_elements(
-                By.CSS_SELECTOR,
-                "[role='article'], article",
-            )
-
-            for article in articles:
-                try:
-                    if not _visible(article):
-                        continue
-
-                    if snippet in _caption_key(article.text):
-                        print("[DEBUG post] Caption matched a post article.")
-                        return article
-
-                except StaleElementReferenceException:
-                    continue
-
-            # Fallback: climb from the caption to the container
-            # that also contains the timestamp or post actions.
-            candidate = current.execute_script(
-                r"""
-                const needle = arguments[0];
-
-                const norm = value => String(value || '')
-                    .normalize('NFKC')
-                    .toLocaleLowerCase()
-                    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-
-                const visible = el => {
-                    const rect = el.getBoundingClientRect();
-                    const style = getComputedStyle(el);
-
-                    return rect.width > 0 &&
-                        rect.height > 0 &&
-                        style.display !== 'none' &&
-                        style.visibility !== 'hidden';
-                };
-
-                const timestampPattern =
-                    /\b\d+\s*(?:s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|mo|mos|month|months|y|yr|yrs|year|years|giây|phút|giờ|ngày|tuần|tháng|năm)\b|\b(?:just now|yesterday|today|hôm nay|hôm qua|vừa xong)\b|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}\b|\b\d{1,2}:\d{2}(?:\s*[ap]m)?\b/i;
-
-                const hasTimestamp = node => {
-                    const elements = [
-                        ...node.querySelectorAll('a[href], time, abbr')
-                    ];
-
-                    return elements.some(el => {
-                        const label = [
-                            el.innerText,
-                            el.getAttribute('aria-label'),
-                            el.getAttribute('title'),
-                            el.getAttribute('datetime'),
-                            el.getAttribute('data-tooltip-content')
-                        ].filter(Boolean).join(' ');
-
-                        return timestampPattern.test(label) ||
-                            el.matches('time[datetime], abbr[data-utime]');
-                    });
-                };
-
-                const hasPostActions = node => {
-                    const actions = [
-                        ...node.querySelectorAll('button, [role="button"]')
-                    ];
-
-                    return actions.some(el => {
-                        const label = norm([
-                            el.innerText,
-                            el.getAttribute('aria-label')
-                        ].filter(Boolean).join(' '));
-
-                        return /^(like|comment|share|thích|bình luận|chia sẻ)(\s+\d+)?$/
-                            .test(label);
-                    });
-                };
-
-                const matches = [
-                    ...document.querySelectorAll(
-                        '[role="article"], article, div'
-                    )
-                ].filter(el => {
-                    if (!visible(el)) return false;
-
-                    const text = norm(el.innerText);
-                    return text.includes(needle) && text.length < 12000;
-                });
-
-                matches.sort(
-                    (a, b) =>
-                        norm(a.innerText).length -
-                        norm(b.innerText).length
-                );
-
-                let actionFallback = null;
-
-                for (const match of matches) {
-                    let node = match;
-                    let depth = 0;
-
-                    while (
-                        node &&
-                        node !== document.body &&
-                        depth < 18
-                    ) {
-                        const text = norm(node.innerText);
-
-                        if (
-                            !text.includes(needle) ||
-                            text.length >= 12000
-                        ) {
-                            break;
-                        }
-
-                        if (node.matches('[role="article"], article')) {
-                            return node;
-                        }
-
-                        // Prefer the smallest ancestor containing both
-                        // the caption and the post timestamp.
-                        if (hasTimestamp(node)) {
-                            return node;
-                        }
-
-                        if (
-                            !actionFallback &&
-                            hasPostActions(node)
-                        ) {
-                            actionFallback = node;
-                        }
-
-                        node = node.parentElement;
-                        depth += 1;
+        result = current.execute_script(
+            r"""
+            const needle = arguments[0];
+            const norm = s => String(s || '').normalize('NFKC').toLowerCase()
+                .replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+            const main = document.querySelector('[role="main"]') || document.body;
+            const matches = [...main.querySelectorAll('span,p,div')]
+                .filter(el => {
+                    const t = el.innerText || '';
+                    return t.length >= needle.length && t.length < 1500 && norm(t).includes(needle);
+                })
+                .sort((a,b) => (a.innerText||'').length - (b.innerText||'').length);
+            const leaves = matches.filter(el => !matches.some(other => other !== el && el.contains(other)));
+            const cards = [];
+            for (const leaf of leaves) {
+                let node = leaf;
+                let chosen = null;
+                for (let depth=0; node && node!==main && depth<18; depth++, node=node.parentElement) {
+                    const len=(node.innerText||'').length;
+                    if (len>6000) break;
+                    if (node.matches('[role="article"], [data-pagelet*="FeedUnit"], [data-pagelet*="TimelineFeedUnit"]')) {
+                        chosen=node; break;
+                    }
+                    // Fallback: compact container with a post header and interaction controls.
+                    const hasPageHeader = !!node.querySelector('a[href*="profile.php"], a[href*="/reel/"], a[href*="/posts/"]');
+                    const hasActions = [...node.querySelectorAll('[role="button"],button')]
+                        .some(x => /^(like|comment|share|thích|bình luận|chia sẻ)$/i.test((x.getAttribute('aria-label')||x.innerText||'').trim()));
+                    if (len >= (leaf.innerText||'').length && len < 4500 && hasPageHeader && hasActions) {
+                        chosen=node; break;
                     }
                 }
-
-                return actionFallback;
-                """,
-                snippet,
-            )
-
-            if candidate:
-                print(
-                    "[DEBUG post] Found the full post container "
-                    "using the caption fallback."
-                )
-                return candidate
-
-            return False
-
-        except StaleElementReferenceException:
-            return False
-
-    try:
-        return WebDriverWait(
-            driver,
-            timeout,
-            poll_frequency=0.5,
-        ).until(locate)
-
-    except TimeoutException:
-        print("[DEBUG post] Post container not found. " f"Search key: {snippet!r}")
-        return None
-
-
-# ----- Find Post Timestamp Link -----
-def _find_post_timestamp_link(article):
-    if article is None:
-        return None
-
-    relative_time = re.compile(
-        r"\b\d+\s*(?:s|sec|secs|second|seconds|m|min|mins|minute|minutes|"
-        r"h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks|"
-        r"mo|mos|month|months|y|yr|yrs|year|years|"
-        r"phút|giờ|ngày|tuần|tháng|năm)\b",
-        re.IGNORECASE,
-    )
-
-    date_label = re.compile(
-        r"\b(?:just now|yesterday|today|hôm nay|hôm qua|vừa xong|"
-        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|"
-        r"fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
-        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
-        r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|"
-        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
-        re.IGNORECASE,
-    )
-
-    try:
-        links = article.find_elements(By.CSS_SELECTOR, "a[href]")
-    except StaleElementReferenceException:
-        return None
-
-    candidates = []
-
-    for index, link in enumerate(links):
-        try:
-            if not _visible(link):
-                continue
-
-            href = (link.get_attribute("href") or "").strip()
-
-            if "facebook.com" not in href.casefold():
-                continue
-
-            text = _normalise(link.text)
-            aria = _normalise(link.get_attribute("aria-label") or "")
-            title = _normalise(link.get_attribute("title") or "")
-
-            if text in {
-                "like",
-                "comment",
-                "share",
-                "thích",
-                "bình luận",
-                "chia sẻ",
-            }:
-                continue
-
-            text_is_time = bool(relative_time.search(text) or date_label.search(text))
-
-            aria_is_time = bool(
-                relative_time.search(aria)
-                or date_label.search(aria)
-                or relative_time.search(title)
-                or date_label.search(title)
-            )
-
-            # Chỉ nhận chữ thời gian thực sự, không nhận mọi link trong bài.
-            if not text_is_time and not (not text and aria_is_time):
-                continue
-
-            href_lower = href.casefold()
-
-            try:
-                path = urlsplit(href).path.casefold()
-            except ValueError:
-                continue
-
-            # Ưu tiên đường dẫn permalink của bài đăng.
-            if (
-                re.search(
-                    r"/(?:[^/?#]+/)*(?:posts|reel|reels|videos|"
-                    r"permalink\.php|share/[prv])(?:/|$)",
-                    path,
-                )
-                or "story_fbid=" in href_lower
-            ):
-                score = 100
-            elif path.endswith("/photo.php") or path.rstrip("/") == "/photo":
-                score = 40
-            elif "/comment" in path or "/reply" in path:
-                score = 0
-            else:
-                score = 20
-
-            score += 10 if text_is_time else 5
-            candidates.append((score, index, link))
-
-        except StaleElementReferenceException:
-            continue
-
-    if not candidates:
-        return None
-
-    # Nếu điểm bằng nhau, chọn link xuất hiện sớm hơn trong bài viết.
-    candidates.sort(key=lambda item: (-item[0], item[1]))
-    return candidates[0][2]
-
-
-# ----- Open Post Detail and Retrieve URL -----
-def _reload_and_find_post_url(
-    driver,
-    caption: str,
-    attempts: int = 2,
-) -> str:
-    attempts = max(1, int(attempts))
-
-    for attempt in range(1, attempts + 1):
-        print(f"[DEBUG post] Finding post, attempt {attempt}/{attempts}.")
-
-        article = _find_post_article(
-            driver,
-            caption,
-            timeout=15,
+                if (chosen && !cards.includes(chosen)) cards.push(chosen);
+            }
+            const unique=cards.filter(n => !cards.some(other => other!==n && other.contains(n)));
+            return {element:unique.length===1 ? unique[0] : null,
+                captionMatches:matches.length, leafMatches:leaves.length, cardCount:unique.length,
+                reason: !matches.length ? 'caption not in DOM' :
+                    !unique.length ? 'caption present but no bounded post card' :
+                    unique.length>1 ? 'ambiguous matching post cards' : 'ok'};
+        """,
+            snippet,
         )
+        if result.get("element") is not None:
+            return result["element"]
+        return False
 
-        if article is None:
-            if attempt >= attempts:
-                break
-
-            print("[DEBUG post] Post not found. Refreshing the Page.")
-            time.sleep(3)
-
-            try:
-                driver.refresh()
-                _wait_for_page_ready(driver, timeout=30)
-                _check_facebook_session(driver)
-                _dismiss_call_now_popup(driver, timeout=3)
-            except TimeoutException:
-                print("[DEBUG post] Page refresh timed out.")
-
-            continue
-
-        timestamp_link = _find_post_timestamp_link(article)
-
-        if timestamp_link is None:
-            if attempt >= attempts:
-                break
-
-            print(
-                "[DEBUG post] Timestamp link unavailable. " "Refreshing and retrying."
-            )
-            time.sleep(2)
-
-            try:
-                driver.refresh()
-                _wait_for_page_ready(driver, timeout=30)
-                _check_facebook_session(driver)
-                _dismiss_call_now_popup(driver, timeout=3)
-            except TimeoutException:
-                print("[DEBUG post] Page refresh timed out.")
-
-            continue
-
-        before_url = driver.current_url
-        before_handles = set(driver.window_handles)
-        original_handle = driver.current_window_handle
-        href = (timestamp_link.get_attribute("href") or "").strip()
-
-        try:
-            # The required action: click the post timestamp first.
-            _click(timestamp_link, driver)
-
-        except StaleElementReferenceException:
-            print("[DEBUG post] Timestamp became stale. Retrying.")
-            continue
-
-        try:
-            WebDriverWait(
-                driver,
-                12,
-                poll_frequency=0.3,
-            ).until(
-                lambda current: (
-                    current.current_url != before_url
-                    or bool(set(current.window_handles) - before_handles)
-                )
-            )
-
-        except TimeoutException:
-            # Navigate directly only if the timestamp href is already
-            # recognized as a safe post permalink, never a photo URL.
-            safe_href = _canonical_post_url(href)
-
-            if safe_href and driver.current_url == before_url:
-                print(
-                    "[DEBUG post] Timestamp click did not navigate. "
-                    "Opening its validated post permalink."
-                )
-                driver.get(safe_href)
-            else:
-                print("[DEBUG post] Timestamp click did not open a " "different URL.")
-                continue
-
-        new_handles = set(driver.window_handles) - before_handles
-
-        if new_handles:
-            driver.switch_to.window(next(iter(new_handles)))
-
-        try:
-            _wait_for_page_ready(driver, timeout=30)
-        except TimeoutException:
-            print("[DEBUG post] Post detail page load timed out.")
-
-        # Read the browser URL after clicking the timestamp.
-        clicked_url = (driver.current_url or "").strip()
-        post_url = _canonical_post_url(clicked_url)
-
-        if post_url:
-            print(f"[DEBUG post] Valid post URL: {post_url}")
-            return post_url
-
-        print("[DEBUG post] Clicked URL is not a post permalink: " f"{clicked_url!r}")
-
-        # If Facebook redirected to a photo URL but the timestamp's
-        # original href is a validated post permalink, use that permalink.
-        safe_href = _canonical_post_url(href)
-
-        if safe_href:
-            try:
-                driver.get(safe_href)
-                _wait_for_page_ready(driver, timeout=30)
-
-                post_url = _canonical_post_url(driver.current_url)
-
-                if post_url:
-                    print("[DEBUG post] Recovered validated post URL: " f"{post_url}")
-                    return post_url
-
-            except TimeoutException:
-                print("[DEBUG post] Validated permalink timed out.")
-
-        # Restore the feed before retrying; never save a photo URL.
-        try:
-            if driver.current_window_handle != original_handle:
-                driver.close()
-
-                if original_handle in driver.window_handles:
-                    driver.switch_to.window(original_handle)
-
-            elif driver.current_url != before_url:
-                driver.back()
-                _wait_for_page_ready(driver, timeout=30)
-
-        except Exception as error:
-            print(f"[DEBUG post] Could not restore the feed: {error}")
-
-        if attempt < attempts:
-            time.sleep(2)
-
-            try:
-                driver.refresh()
-                _wait_for_page_ready(driver, timeout=30)
-                _check_facebook_session(driver)
-            except TimeoutException:
-                print("[DEBUG post] Page refresh timed out.")
-
-    raise PublishUnknownError(
-        "The post may have been published, but Facebook did not provide "
-        "a valid post permalink after clicking its timestamp. "
-        "No photo URL was saved. Check the Page before retrying."
-    )
+    try:
+        return WebDriverWait(driver, timeout, poll_frequency=0.5).until(locate)
+    except TimeoutException:
+        return None
 
 
-# ----- Inspect Post button -----
+# ----- Post and Next Button Detection -----
 def _inspect_post_button(driver):
     return driver.execute_script(
         r"""
@@ -1824,7 +869,6 @@ def _inspect_post_button(driver):
     )
 
 
-# ----- Inspect Next button -----
 def _inspect_next_button(driver):
     return driver.execute_script(
         r"""
@@ -1934,7 +978,7 @@ def _inspect_next_button(driver):
     )
 
 
-# ----- Close Call Now popup -----
+# ----- Call Now Popup Handling -----
 def _find_call_now_popup_root(driver):
     return driver.execute_script(r"""
         const norm = value => String(value || '')
@@ -2169,7 +1213,7 @@ def _dismiss_call_now_popup(
     return True
 
 
-# ----- Read workflow snapshot -----
+# ----- Workflow State and Composer Status -----
 def _workflow_snapshot(driver) -> str:
     return driver.execute_script(r"""
         const visible = element => {
@@ -2224,7 +1268,6 @@ def _workflow_snapshot(driver) -> str:
         """) or ""
 
 
-# ----- Read composer status -----
 def _composer_status(driver) -> str:
     try:
         return driver.execute_script(r"""
@@ -2279,7 +1322,7 @@ def _composer_status(driver) -> str:
         return ""
 
 
-# ----- Wait for Next or Post -----
+# ----- Workflow Action Detection -----
 def _wait_for_workflow_action(driver, timeout: int = POST_BUTTON_TIMEOUT):
     last_state = {
         "next": "not_found",
@@ -2345,7 +1388,6 @@ def _wait_for_workflow_action(driver, timeout: int = POST_BUTTON_TIMEOUT):
         ) from error
 
 
-# ----- Wait for workflow transition -----
 def _wait_for_step_transition(
     driver,
     previous_button,
@@ -2395,7 +1437,73 @@ def _wait_for_step_transition(
         ) from error
 
 
-# ----- Wait for Post button -----
+# ----- Facebook Feed Scrolling -----
+def _scroll_to_render_posts(driver, pixels=600, wait=1.5):
+    try:
+        scroll_area = driver.execute_script("""
+            const main = document.querySelector('[role="main"]');
+            const feed = document.querySelector('[role="feed"]');
+
+            return feed || main || document.body;
+        """)
+
+        before = driver.execute_script("""
+            return {
+                windowY: window.scrollY,
+                documentY: document.scrollingElement.scrollTop
+            };
+        """)
+
+        try:
+            ActionChains(driver).move_to_element(scroll_area).scroll_by_amount(
+                0, pixels
+            ).perform()
+
+        except Exception as error:
+            pass
+
+        time.sleep(0.5)
+
+        driver.execute_script(
+            """
+            const main = document.querySelector('[role="main"]');
+            let node = main;
+
+            while (node) {
+                const style = getComputedStyle(node);
+
+                if (
+                    node.scrollHeight > node.clientHeight &&
+                    ['auto', 'scroll'].includes(style.overflowY)
+                ) {
+                    node.scrollTop += arguments[0];
+                    return;
+                }
+
+                node = node.parentElement;
+            }
+
+            window.scrollBy(0, arguments[0]);
+        """,
+            pixels,
+        )
+
+        time.sleep(wait)
+
+        after = driver.execute_script("""
+            return {
+                windowY: window.scrollY,
+                documentY: document.scrollingElement.scrollTop
+            };
+        """)
+
+        return True
+
+    except Exception as error:
+        return False
+
+
+# ----- Post Button and Publish Confirmation -----
 def _wait_for_post_button(driver, timeout: int = POST_BUTTON_TIMEOUT):
     last_state = {"status": "not_found"}
 
@@ -2457,7 +1565,6 @@ def _wait_for_post_button(driver, timeout: int = POST_BUTTON_TIMEOUT):
         ) from error
 
 
-# ----- Wait for publish confirmation -----
 def _find_publish_success_notice(driver) -> str:
     return driver.execute_script(r"""
         const selectors = [
@@ -2564,7 +1671,6 @@ def _wait_for_publish_confirmation(driver, timeout: int = 90) -> str:
     state = {"composer_closed_at": None}
 
     def check(current):
-        # Close the Call Now popup if Facebook displays it.
         try:
             if _call_now_popup_visible(current):
                 try:
@@ -2574,13 +1680,11 @@ def _wait_for_publish_confirmation(driver, timeout: int = 90) -> str:
         except Exception:
             pass
 
-        # Prefer an explicit success notification.
         notice = _find_publish_success_notice(current)
 
         if notice:
             return f"notification: {notice}"
 
-        # Fallback: wait until the composer remains closed for 3 seconds.
         if _visible_dialog(current) is None:
             if state["composer_closed_at"] is None:
                 state["composer_closed_at"] = time.monotonic()
@@ -2606,7 +1710,7 @@ def _wait_for_publish_confirmation(driver, timeout: int = 90) -> str:
         ) from error
 
 
-# ----- Publish post -----
+# ----- Publish Photo or Video -----
 def publish_photo(driver, row: dict) -> None:
     page_name = str(row.get("page") or row.get("page_name") or "").strip()
     page_link = str(row.get("page_link") or "").strip()
@@ -2622,16 +1726,13 @@ def publish_photo(driver, row: dict) -> None:
     if not media_path:
         raise FacebookPostError("Media path is missing from Excel.")
 
-    # ----- Switch to Page -----
     switch_to_page(driver, page_name)
 
-    # ----- Open Page -----
     driver.get(page_link)
     _wait_for_page_ready(driver)
     _check_facebook_session(driver)
     _dismiss_call_now_popup(driver, appearance_timeout=1)
 
-    # ----- Open composer -----
     composer = _find_composer_trigger(driver)
 
     if composer is None:
@@ -2643,7 +1744,6 @@ def publish_photo(driver, row: dict) -> None:
     _dismiss_call_now_popup(driver, appearance_timeout=3)
     dialog = _wait_for_dialog(driver)
 
-    # ----- Import media -----
     file_input = _find_file_input(driver, dialog)
 
     try:
@@ -2656,7 +1756,6 @@ def publish_photo(driver, row: dict) -> None:
 
     dialog = _visible_dialog(driver) or dialog
 
-    # ----- Enter caption -----
     def locate_caption(_):
         try:
             current_dialog = _visible_dialog(driver) or dialog
@@ -2669,7 +1768,6 @@ def publish_photo(driver, row: dict) -> None:
     _click(caption_box, driver)
     caption_box.send_keys(caption)
 
-    # ----- Next -> Post for photos; Next -> Next -> Post for videos -----
     video_extensions = {
         ".mp4",
         ".mov",
@@ -2716,13 +1814,11 @@ def publish_photo(driver, row: dict) -> None:
             timeout=20,
         )
 
-    # ----- Wait for final Post button -----
     post_button = _wait_for_post_button(
         driver,
         timeout=POST_BUTTON_TIMEOUT,
     )
 
-    # ----- Submit post once -----
     try:
         _click_once(post_button, driver)
     except Exception as error:
@@ -2731,7 +1827,6 @@ def publish_photo(driver, row: dict) -> None:
             "Check the Page before retrying to avoid publishing a duplicate."
         ) from error
 
-    # ----- Close Call Now popup if it appears -----
     try:
         _dismiss_call_now_popup(
             driver,
@@ -2745,139 +1840,157 @@ def publish_photo(driver, row: dict) -> None:
             "Check the Page before retrying to avoid a duplicate."
         ) from error
 
-    # ----- Wait for Facebook publish confirmation -----
     _wait_for_publish_confirmation(driver, timeout=90)
 
 
-# ----- Post comment -----
-def post_comment(driver, caption: str, comment: str) -> None:
-    comment = str(comment or "").strip()
-
-    if not comment:
-        raise CommentPostError("Comment text is missing.")
-
-    comment_key = _normalise(comment)
-    article = _find_post_article(driver, caption, timeout=20)
-
-    if article is None:
-        raise CommentPostError("Published post could not be located in the Page feed.")
-
-    box = None
-
-    for item in article.find_elements(
-        By.CSS_SELECTOR,
-        "[contenteditable='true'][role='textbox'], textarea",
-    ):
-        if not _visible(item):
+# ----- Open Published Post -----
+def click_published_post_timestamp(
+    driver, caption: str, attempts: int = 2, page_link: str = ""
+) -> None:
+    attempts = max(1, int(attempts))
+    for cycle in range(1, attempts + 1):
+        driver.refresh()
+        try:
+            _wait_for_page_ready(driver, timeout=30)
+        except TimeoutException:
+            pass
+        _check_facebook_session(driver)
+        try:
+            _dismiss_call_now_popup(driver, timeout=3)
+        except Exception:
+            pass
+        if page_link:
+            expected = page_link.split("?", 1)[0].rstrip("/").casefold()
+            actual = driver.current_url.split("?", 1)[0].rstrip("/").casefold()
+            if expected != actual:
+                driver.get(page_link)
+                _wait_for_page_ready(driver, timeout=30)
+                _check_facebook_session(driver)
+        time.sleep(3)
+        _scroll_to_render_posts(driver, pixels=600, wait=1.5)
+        article = _find_post_article(driver, caption, timeout=12)
+        if article is None:
             continue
-
-        label = _normalise(
-            item.get_attribute("aria-label") or item.get_attribute("placeholder")
-        )
-
-        if any(word in label for word in ("comment", "bình luận", "reply", "trả lời")):
-            box = item
-            break
-
-    # ----- Open comment input if needed -----
-    if box is None:
-        open_comment = _dom_find_action(
-            driver,
-            {
-                "comment",
-                "bình luận",
-                "write a comment",
-                "viết bình luận",
-            },
-            article,
-            exact=False,
-        )
-
-        if open_comment is not None:
-            _click(open_comment, driver)
-            time.sleep(0.5)
-
-            for item in article.find_elements(
-                By.CSS_SELECTOR,
-                "[contenteditable='true'][role='textbox'], textarea",
-            ):
-                if _visible(item):
-                    box = item
-                    break
-
-    if box is None:
-        raise CommentPostError(
-            "Could not find the comment input for the published post."
-        )
-
-    # ----- Enter the entire Excel cell as one comment -----
-    _click(box, driver)
-
-    comment_lines = comment.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-
-    for index, line in enumerate(comment_lines):
-        if line:
-            box.send_keys(line)
-
-        if index < len(comment_lines) - 1:
-            # Xuống dòng bên trong cùng một bình luận, không submit.
-            box.send_keys(Keys.SHIFT, Keys.ENTER)
-
-    # ----- Submit comment once -----
-    submit = _dom_find_action(
-        driver,
-        COMMENT_ACTIONS,
-        article,
-        exact=False,
+        anchors = article.find_elements(By.CSS_SELECTOR, "a[href]")
+        if len(anchors) < 3:
+            continue
+        candidate = anchors[2]
+        if not candidate.is_displayed() or not candidate.is_enabled():
+            continue
+        original_handles = set(driver.window_handles)
+        _click(candidate, driver)
+        for _ in range(20):
+            new_handles = set(driver.window_handles) - original_handles
+            if new_handles:
+                driver.switch_to.window(next(iter(new_handles)))
+                break
+            time.sleep(0.25)
+        return
+    raise PublishUnknownError(
+        f"Post submitted, but its caption/anchor was not found after {attempts} cycles. "
+        "Do not republish automatically."
     )
 
-    if submit is not None:
-        try:
-            _click_once(submit, driver)
-        except Exception as error:
-            raise CommentPostError(
-                "Facebook did not confirm whether the comment submission was "
-                "accepted. Check the post before trying again."
-            ) from error
-    else:
-        box.send_keys(Keys.ENTER)
 
-    # ----- Verify the entire comment -----
-    def comment_is_confirmed(_):
-        try:
-            current_article = _find_post_article(
-                driver,
-                caption,
-                timeout=1,
+# ----- Post Permalink Normalization -----
+def _post_permalink(url: str) -> str:
+    from urllib.parse import urlparse
+
+    parts = urlparse(url or "")
+    if parts.hostname not in ("www.facebook.com", "facebook.com", "m.facebook.com"):
+        return ""
+    path = parts.path.rstrip("/")
+    if re.search(r"/(?:reel|videos|posts|permalink)/[0-9]+$", path):
+        return "https://www.facebook.com" + path + "/"
+    if path == "/story.php":
+        query = parse_qs(parts.query)
+        if query.get("story_fbid"):
+            return (
+                "https://www.facebook.com/story.php?story_fbid="
+                + query["story_fbid"][0]
+                + ("&id=" + query["id"][0] if query.get("id") else "")
             )
+    return ""
 
-            if current_article is None:
-                return False
 
-            # Nếu nội dung vẫn nằm trong ô nhập, chưa xác nhận đã gửi.
-            editors = current_article.find_elements(
-                By.CSS_SELECTOR,
-                "[contenteditable='true'][role='textbox'], textarea",
+# ----- Publish Comment -----
+def post_comment_on_opened_post(driver, comment: str) -> bool:
+    comment = str(comment or "").strip()
+    if not comment:
+        return False
+    if not _post_permalink(driver.current_url):
+        raise CommentPostError(
+            "Opened view is not a verified post permalink. Comment not submitted."
+        )
+    editors = driver.find_elements(
+        By.CSS_SELECTOR,
+        "[contenteditable='true'][role='textbox'], [contenteditable='true'][data-lexical-editor='true']",
+    )
+
+    def is_comment_editor(el):
+        if not _visible(el):
+            return False
+        label = _normalise(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        el.get_attribute("aria-label"),
+                        el.get_attribute("data-placeholder"),
+                        el.get_attribute("aria-placeholder"),
+                    ],
+                )
             )
+        )
+        return any(
+            token in label
+            for token in ("comment", "bình luận", "write a comment", "viết bình luận")
+        )
 
-            for item in editors:
-                value = _normalise(item.text or item.get_attribute("value") or "")
+    candidates = [el for el in editors if is_comment_editor(el)]
+    if len(candidates) != 1:
+        raise CommentPostError(
+            f"Expected one comment editor, found {len(candidates)}. Nothing submitted."
+        )
+    box = candidates[0]
+    _click(box, driver)
+    lines = comment.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    for i, line in enumerate(lines):
+        if line:
+            box.send_keys(line)
+        if i != len(lines) - 1:
+            box.send_keys(Keys.SHIFT, Keys.ENTER)
+    box.send_keys(Keys.ENTER)
+    key = _normalise(comment)
 
-                if comment_key in value:
-                    return False
-
-            return comment_key in _normalise(current_article.text)
-
+    def confirmed(_):
+        try:
+            visible = driver.find_elements(
+                By.CSS_SELECTOR, "div[role='article'], ul li, div[dir='auto']"
+            )
+            for node in visible:
+                if not _visible(node):
+                    continue
+                if node.get_attribute("contenteditable") == "true":
+                    continue
+                if _normalise(node.text) == key:
+                    return True
+            return False
         except StaleElementReferenceException:
             return False
 
     try:
-        WebDriverWait(
-            driver,
-            20,
-            poll_frequency=0.5,
-        ).until(comment_is_confirmed)
-    except TimeoutException as error:
-        raise CommentPostError(
-            "Facebook did not confirm that the entire comment was published."
-        ) from error
+        WebDriverWait(driver, 20, poll_frequency=0.5).until(confirmed)
+    except TimeoutException:
+        return False
+    return True
+
+
+# ----- Get Opened Post URL -----
+def get_opened_post_url(driver) -> str:
+    url = _post_permalink(driver.current_url)
+    if not url:
+        raise PublishUnknownError(
+            "Current browser address is not a verified post permalink; URL not saved."
+        )
+    return url

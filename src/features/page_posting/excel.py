@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from openpyxl import load_workbook
 
 from src.configs.path import DATA_FILE
@@ -77,7 +75,7 @@ def load_page_rows() -> list[dict]:
                     "page_link": clean_value(page.get("page_link")),
                     "page_status": clean_value(page.get("status")),
                     "caption": clean_value(post.get("caption")),
-                    "image": clean_value(post.get("image")),
+                    "media": clean_value(post.get("media")),
                     "comment": clean_value(post.get("comment")),
                     "status": "",
                 }

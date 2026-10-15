@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.components.input import Input
+from src.components.text_area import TextArea
 from src.styles.table_style import TABLE_STYLE
 from src.themes.spacing import SPACING as SPACE
 
@@ -301,6 +302,9 @@ class Table(QWidget):
         if cell_type == "input":
             return self.create_input(str(value), column)
 
+        if cell_type == "textarea":
+            return self.create_text_area(str(value), column)
+
         if cell_type == "status":
             return self.create_status(str(value), column)
 
@@ -337,6 +341,21 @@ class Table(QWidget):
         label.setAlignment(self.get_alignment(column))
 
         return label
+
+    # ----- Text Area -----
+    def create_text_area(self, text: str, column: dict):
+        read_only = column.get(
+            "read_only",
+            not column.get("editable", False),
+        )
+
+        return TextArea(
+            text=text,
+            placeholder=column.get("placeholder", ""),
+            read_only=read_only,
+            min_height=column.get("min_height", 64),
+            max_height=column.get("max_height"),
+        )
 
     # ----- Status -----
     def create_status(self, status: str, column: dict):

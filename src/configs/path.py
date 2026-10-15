@@ -9,7 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 # ----- Data -----
 DATA_DIR = ROOT_DIR / "data"
 RESULT_DIR = DATA_DIR / "devlogs"
-DATA_FILE = DATA_DIR / "Databook.xlsx"
+DATA_FILE = DATA_DIR / "databook.xlsx"
 
 
 # ----- Downloads -----
