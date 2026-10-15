@@ -1,5 +1,10 @@
 from pathlib import Path
 
+from datetime import datetime
+from openpyxl import load_workbook
+
+
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -12,7 +17,7 @@ from src.components.button import Button
 from src.components.card import StatCard, TableCard
 from src.components.page_header import PageHeader
 from src.components.table import Table
-from src.configs.path import DOWNLOAD_DIR
+from src.configs.path import DOWNLOAD_DIR, RESULT_DIR
 from src.configs.table import PAGE_TABLE_COLUMNS
 from src.features.page_posting.worker import (
     PageAutoWorker,
@@ -195,6 +200,7 @@ class PageAutoPage(QWidget):
 
     # ----- Import -----
     def import_excel(self):
+
         if self.importing or self.running:
             return
 
@@ -207,17 +213,13 @@ class PageAutoPage(QWidget):
         )
 
         self.import_worker.result.connect(self.handle_import_result)
-
         self.import_worker.error.connect(self.handle_import_error)
-
         self.import_worker.finished.connect(self.clear_import_worker)
 
         self.import_worker.start()
 
-    def handle_import_result(
-        self,
-        result: dict,
-    ):
+    def handle_import_result(self, result: dict):
+
         self.data_file_stamp = result["file_stamp"]
 
         if not result["changed"]:
@@ -238,9 +240,7 @@ class PageAutoPage(QWidget):
                 row["status"] = old_status[task_id]
 
         self.data_signature = result["signature"]
-
         self.page_jobs = result["jobs"]
-
         self.page_rows = rows
 
         self.refresh_page()
@@ -311,19 +311,126 @@ class PageAutoPage(QWidget):
 
     # ----- Action State -----
     def update_action_state(self):
-        has_data = bool(self.page_rows)
+        import time
 
+        # ----- Button State -----
+        has_data = bool(self.page_rows)
         busy = self.importing or self.running
 
         self.import_button.setEnabled(not busy)
-
         self.open_button.setEnabled(not busy)
-
         self.run_button.setVisible(has_data and not busy)
-
         self.stop_button.setVisible(self.running)
-
         self.stop_button.setEnabled(self.running)
+
+        # ----- Automation Timer -----
+        if not hasattr(self, "_automation_timer"):
+            self._automation_state_cache = {}
+            self._automation_state_last_read = 0.0
+
+            self._automation_timer = QTimer(self)
+            self._automation_timer.setInterval(1_000)
+            self._automation_timer.timeout.connect(self.update_action_state)
+
+        if not self.running:
+            if self._automation_timer.isActive():
+                self._automation_timer.stop()
+
+            self.automation_card.value_label.setText("--:--")
+            self.automation_card.description_label.setText("Not scheduled")
+            return
+
+        if not self._automation_timer.isActive():
+            self._automation_timer.start()
+
+        # ----- Refresh RUN_STATE Cache -----
+        monotonic_now = time.monotonic()
+
+        if monotonic_now - self._automation_state_last_read >= 5:
+            self._automation_state_last_read = monotonic_now
+            state_file = Path(RESULT_DIR) / "PageAuto_DevLog.xlsx"
+
+            if not state_file.is_file():
+                self._automation_state_cache = {}
+            else:
+                try:
+                    workbook = load_workbook(
+                        state_file,
+                        read_only=True,
+                        data_only=True,
+                    )
+
+                    try:
+                        state = {}
+
+                        if "RUN_STATE" in workbook.sheetnames:
+                            for key, value in workbook["RUN_STATE"].iter_rows(
+                                min_row=2,
+                                values_only=True,
+                            ):
+                                if key:
+                                    state[str(key).strip()] = value
+
+                        self._automation_state_cache = state
+                    finally:
+                        workbook.close()
+                except Exception:
+                    pass
+
+        # ----- Parse Cached RUN_STATE -----
+        state = self._automation_state_cache
+
+        try:
+            last_completed_order = int(float(state.get("last_completed_order")))
+        except (TypeError, ValueError):
+            last_completed_order = None
+
+        try:
+            raw_next_order_at = state.get("next_order_at")
+            next_order_at = (
+                datetime.fromisoformat(str(raw_next_order_at)).astimezone()
+                if raw_next_order_at
+                else None
+            )
+        except (TypeError, ValueError):
+            next_order_at = None
+
+        # ----- Check Next Post Order -----
+        has_next_order = False
+
+        if last_completed_order is not None:
+            for job in self.page_jobs:
+                try:
+                    order = int(float(job.get("post_order")))
+                except (TypeError, ValueError):
+                    continue
+
+                if order > last_completed_order:
+                    has_next_order = True
+                    break
+
+        # ----- Update Automation Card -----
+        now = datetime.now().astimezone()
+
+        if has_next_order and next_order_at is not None:
+            self.automation_card.value_label.setText(next_order_at.strftime("%H:%M"))
+
+            remaining_seconds = int((next_order_at - now).total_seconds())
+
+            if remaining_seconds > 0:
+                minutes, seconds = divmod(remaining_seconds, 60)
+
+                if minutes:
+                    description = f"Starts in {minutes} min {seconds:02d} sec"
+                else:
+                    description = f"Starts in {seconds} sec"
+            else:
+                description = "Running now"
+
+            self.automation_card.description_label.setText(description)
+        else:
+            self.automation_card.value_label.setText("--:--")
+            self.automation_card.description_label.setText("Not scheduled")
 
     # ----- Open Excel -----
     def open_excel(self):
