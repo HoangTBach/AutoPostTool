@@ -1,8 +1,4 @@
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QStackedWidget,
-    QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QStackedWidget, QWidget
 
 from src.components.sidebar import Sidebar
 from src.pages.dashboard import DashboardPage
@@ -14,7 +10,6 @@ from src.pages.update import UpdatePage
 
 
 class MainLayout(QWidget):
-
     # ----- Settings -----
     MARGINS = (0, 0, 0, 0)
     SPACING = 0

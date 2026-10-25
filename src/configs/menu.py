@@ -9,7 +9,7 @@ MENU_ITEMS = {
         # {"icon": ICON_DIR / "dashboard.svg", "name": "Dashboard", "page": "dashboard"},
         {"icon": ICON_DIR / "file-text.svg", "name": "Page Auto", "page": "page_auto"},
         # {"icon": ICON_DIR / "users-2.svg", "name": "Group Auto", "page": "group_auto"},
-        # {"icon": ICON_DIR / "newspaper.svg", "name": "News Auto", "page": "news_auto"},
+        {"icon": ICON_DIR / "newspaper.svg", "name": "News Auto", "page": "news_auto"},
     ],
     "bottom": [
         # {"icon": ICON_DIR / "refresh-cw.svg", "name": "Update", "page": "update"},
