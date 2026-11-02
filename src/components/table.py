@@ -1,3 +1,4 @@
+from urllib.parse import unquote, urlsplit
 from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
@@ -13,8 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.components.input import Input
-from src.components.text_area import TextArea
+from src.components.input import Input, InputMode
 from src.styles.table_style import TABLE_STYLE
 from src.themes.spacing import SPACING as SPACE
 
@@ -302,9 +302,6 @@ class Table(QWidget):
         if cell_type == "input":
             return self.create_input(str(value), column)
 
-        if cell_type == "textarea":
-            return self.create_text_area(str(value), column)
-
         if cell_type == "status":
             return self.create_status(str(value), column)
 
@@ -330,32 +327,25 @@ class Table(QWidget):
 
     # ----- Input -----
     def create_input(self, text: str, column: dict):
-        if column.get("editable", False):
-            return Input(
-                text=text,
-                editable=True,
-            )
+        configured_mode = column.get("mode")
 
-        label = ElideLabel(text)
-        label.setObjectName("tableBox")
-        label.setAlignment(self.get_alignment(column))
+        if configured_mode is not None:
+            mode = InputMode(configured_mode)
 
-        return label
+        elif "editable" in column:
+            mode = InputMode.NORMAL if column["editable"] else InputMode.LOCKED
 
-    # ----- Text Area -----
-    def create_text_area(self, text: str, column: dict):
-        read_only = column.get(
-            "read_only",
-            not column.get("editable", False),
-        )
+        else:
+            mode = InputMode.NORMAL
 
-        return TextArea(
+        input_widget = Input(
             text=text,
-            placeholder=column.get("placeholder", ""),
-            read_only=read_only,
-            min_height=column.get("min_height", 64),
-            max_height=column.get("max_height"),
+            mode=mode,
         )
+
+        input_widget.setAlignment(self.get_alignment(column))
+
+        return input_widget
 
     # ----- Status -----
     def create_status(self, status: str, column: dict):
@@ -437,12 +427,25 @@ class Table(QWidget):
 
         if source:
             values = row.get(source, [])
-
             field = column.get("field")
-
             return [item.get(field, "") for item in values]
 
-        return row.get(column.get("key"), "")
+        key = column.get("key")
+        value = row.get(key, "")
+
+        if column.get("display_filename") and value:
+            original_value = str(value).strip().strip("\"'")
+
+            if original_value.lower().startswith(("http://", "https://")):
+                original_value = unquote(urlsplit(original_value).path)
+
+            display_value = (
+                original_value.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            )
+
+            return display_value or str(value)
+
+        return value
 
     # ----- Row Height -----
     def get_row_height(self, row: dict):

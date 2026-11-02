@@ -1,6 +1,6 @@
 # ----- App -----
 APP_NAME = "AutoPostTool"
-APP_VERSION = "v0.1.0"
+APP_VERSION = "v1.0.0"
 
 # ----- Window -----
 WINDOW_DESCRIPTION = "Automation Posting Facebook"

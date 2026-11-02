@@ -35,4 +35,14 @@ QLineEdit#input[editable="true"] {{
 QLineEdit#input:focus {{
     border-color: {INPUT_BORDER_FOCUS};
 }}
+
+QLineEdit#input[mode="locked"] {{
+    background-color: #F6F8FB;
+    color: #0F172A;
+    border-color: #E2E8F0;
+}}
+
+QLineEdit#input[mode="locked"][variant="file_path"] {{
+    background-color: transparent;
+}}
 """

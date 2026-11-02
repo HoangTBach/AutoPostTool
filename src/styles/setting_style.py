@@ -96,4 +96,39 @@ QLabel#reconnectLabel {{
     font-size: {FONTS["size"][11]}px;
     font-weight: {FONTS["weight"]["semibold"]};
 }}
+QWidget#settingsPathField {{
+    background-color: transparent;
+    border: none;
+    font-size: {FONTS["size"][13]}px;
+    font-weight: {FONTS["weight"]["semibold"]};
+}}
+
+QToolButton#settingsPathBrowseButton {{
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    font-size: {FONTS["size"][12]}px;
+    font-weight: {FONTS["weight"]["regular"]};
+}}
+
+QWidget#unsavedStatus {{
+    background-color: {TRANSPARENT};
+    border: none;
+}}
+
+QLabel#unsavedStatusTitle {{
+    background-color: {TRANSPARENT};
+    color: {COLORS["slate"][900]};
+    border: none;
+    font-size: {FONTS["size"][13]}px;
+    font-weight: {FONTS["weight"]["semibold"]};
+}}
+
+QLabel#unsavedStatusDescription {{
+    background-color: {TRANSPARENT};
+    color: {COLORS["slate"][400]};
+    border: none;
+    font-size: {FONTS["size"][12]}px;
+    font-weight: {FONTS["weight"]["regular"]};
+}}
 """
