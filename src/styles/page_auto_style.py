@@ -15,6 +15,7 @@ PAGE_AUTO_CONFIG_CARD_MARGINS = (SPACE[16], SPACE[16], SPACE[16], SPACE[16])
 PAGE_AUTO_CONFIG_CARD_SPACING = SPACE[8]
 PAGE_AUTO_CONFIG_BODY_SPACING = SPACE[32]
 PAGE_AUTO_CONFIG_CONTROL_SPACING = SPACE[16]
+PAGE_AUTO_CONFIG_DIVIDER_HEIGHT = 48
 
 # ----- Colors -----
 TRANSPARENT = COLORS["transparent"]
@@ -24,6 +25,7 @@ TABLE_BORDER = COLORS["slate"][200]
 
 # ----- Border -----
 BORDER_WIDTH = BORDERS["width"]["default"]
+PAGE_AUTO_CONFIG_DIVIDER_WIDTH = BORDER_WIDTH
 
 
 PAGE_AUTO_STYLE = f"""
@@ -50,6 +52,11 @@ QLabel#configUnitLabel {{
     background-color: {TRANSPARENT};
     font-size: {FONTS["size"][12]}px;
     font-weight: {FONTS["weight"]["regular"]};
+}}
+
+QWidget#configDivider {{
+    background-color: {TABLE_BORDER};
+    border: none;
 }}
 
 QTableWidget#pageTable {{

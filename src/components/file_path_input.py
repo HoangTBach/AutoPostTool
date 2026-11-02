@@ -54,7 +54,9 @@ def _render_tinted_svg(
 
 
 class FilePathInput(QWidget):
-    def __init__(self, text: str | None = None, parent=None):
+    def __init__(
+        self, text: str | None = None, parent=None, *, variant: str | None = None
+    ):
         super().__init__(parent)
         self.setObjectName("filePathInput")
         self.setStyleSheet(FILE_PATH_INPUT_STYLE)
@@ -69,6 +71,7 @@ class FilePathInput(QWidget):
         self.path_input = Input(
             text=display_text,
             mode=InputMode.LOCKED,
+            variant=variant,
             parent=self,
         )
         self.path_input.setPlaceholderText("Select media folder")

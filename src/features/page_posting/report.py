@@ -1,13 +1,13 @@
+import traceback as traceback_module
 import zipfile
-
+from copy import copy
 from datetime import datetime
 from pathlib import Path
-import traceback as traceback_module
 
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
-from openpyxl.utils.exceptions import InvalidFileException
+from openpyxl import Workbook, load_workbook  # type: ignore
+from openpyxl.styles import Alignment, PatternFill  # type: ignore
+from openpyxl.utils import get_column_letter  # type: ignore
+from openpyxl.utils.exceptions import InvalidFileException  # type: ignore
 
 from src.configs.path import DEVLOG_DIR, RESULT_DIR
 
@@ -65,34 +65,9 @@ _HEADER_FILL = PatternFill(
     "solid",
     fgColor=COLORS["blue"][300].lstrip("#"),
 )
-_HEADER_FONT = Font(
-    name="Aptos",
-    size=10,
-    bold=True,
-    color=COLORS["slate"][900].lstrip("#"),
+_HEADER_COLOR = COLORS.get("neutral", {}).get("black") or COLORS.get("slate", {}).get(
+    900, "#0F172A"
 )
-_BODY_FONT = Font(
-    name="Aptos",
-    size=10,
-    color=COLORS["slate"][800].lstrip("#"),
-)
-_HEADER_BORDER = Border(
-    bottom=Side(
-        style="medium",
-        color=COLORS["blue"][600].lstrip("#"),
-    ),
-)
-_BODY_BORDER = Border(
-    bottom=Side(
-        style="thin",
-        color=COLORS["slate"][200].lstrip("#"),
-    ),
-)
-_ALT_ROW_FILL = PatternFill(
-    "solid",
-    fgColor=COLORS["slate"][50].lstrip("#"),
-)
-_NO_FILL = PatternFill(fill_type=None)
 
 _STATUS_COLORS = {
     "Published": (COLORS["emerald"][50], COLORS["green"][600]),
@@ -114,6 +89,7 @@ _RESULT_WIDTHS = {
     "page_name": 28,
     "caption": 65,
     "media": 52,
+    "image": 52,
     "comment": 48,
     "post_status": 17,
     "published_at": 23,
@@ -138,103 +114,109 @@ _DEVLOG_WIDTHS = {
 }
 
 
-def _style_data_row(sheet, row_index: int, status_header: str) -> None:
-    headers = {
-        str(cell.value): cell.column for cell in sheet[1] if cell.value is not None
-    }
-    status_column = headers.get(status_header)
-
-    for cell in sheet[row_index]:
-        cell.fill = _ALT_ROW_FILL if row_index % 2 == 0 else _NO_FILL
-        cell.font = _BODY_FONT
-        cell.alignment = Alignment(vertical="top", wrap_text=True)
-        cell.border = _BODY_BORDER
-
-        header = str(sheet.cell(1, cell.column).value or "")
-        if header in {"timestamp", "published_at"} and isinstance(cell.value, datetime):
-            cell.number_format = "yyyy-mm-dd hh:mm:ss"
-
-        if header == "post_url":
-            url = str(cell.value or "").strip()
-            if url.startswith(("https://", "http://")):
-                cell.hyperlink = url
-                cell.font = Font(
-                    name="Aptos",
-                    size=10,
-                    color=COLORS["blue"][600].lstrip("#"),
-                    underline="single",
-                )
-
-    if status_column:
-        status_cell = sheet.cell(row_index, status_column)
-        status = str(status_cell.value or "").strip()
-        status_colors = _STATUS_COLORS.get(status)
-        if status_colors:
-            # Keep the row's normal alternating background.
-            # Status styling changes font color only, not the cell fill.
-            _, font_color = status_colors
-            status_cell.font = Font(
-                name="Aptos",
-                size=10,
-                bold=True,
-                color=font_color.lstrip("#"),
-            )
-            status_cell.alignment = Alignment(
-                horizontal="center",
-                vertical="center",
-                wrap_text=True,
-            )
+def _font_with(cell, *, bold=None, color=None):
+    """Preserve the current font family and size while changing emphasis/color."""
+    font = copy(cell.font)
+    if bold is not None:
+        font.bold = bold
+    if color is not None:
+        font.color = color.lstrip("#")
+    cell.font = font
 
 
-def _style_worksheet(sheet, widths: dict, status_header: str) -> None:
-    if sheet.max_column < 1:
-        return
-
-    sheet.sheet_view.showGridLines = False
+def _style_sheet(sheet, widths=None, status_column=None):
+    """Apply the legacy report style without changing worksheet values."""
+    widths = widths or {}
+    sheet.sheet_view.showGridLines = True
     sheet.freeze_panes = "A2"
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.sheet_view.zoomScale = 90
+    sheet.row_dimensions[1].height = 15.75
 
-    headers = {
-        str(cell.value): cell.column for cell in sheet[1] if cell.value is not None
-    }
+    for dimension in sheet.column_dimensions.values():
+        if dimension.index == "K":
+            dimension.hidden = False
 
     for cell in sheet[1]:
         cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
+        _font_with(cell, bold=True, color=_HEADER_COLOR)
         cell.alignment = Alignment(
-            horizontal="center",
             vertical="center",
+            horizontal="center",
             wrap_text=True,
         )
-        cell.border = _HEADER_BORDER
 
-    sheet.row_dimensions[1].height = 30
+    header_positions = {str(cell.value): cell.column for cell in sheet[1] if cell.value}
 
-    for column_index in range(1, sheet.max_column + 1):
-        header = str(sheet.cell(1, column_index).value or "")
+    for index, cell in enumerate(sheet[1], start=1):
+        if cell.value is None:
+            continue
+        header = str(cell.value)
         width_key = "media" if header == "image" else header
-        width = widths.get(width_key, max(14, min(len(header) + 4, 24)))
-        column_letter = get_column_letter(column_index)
-        sheet.column_dimensions[column_letter].width = width
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = widths.get(width_key, 18)
 
-        if header == "error":
-            sheet.column_dimensions[column_letter].hidden = False
+    sheet.auto_filter.ref = None
+    sheet.auto_filter.filterColumn = []
+    status_index = header_positions.get(status_column) if status_column else None
+    date_indices = {
+        header_positions[name]
+        for name in ("timestamp", "published_at")
+        if name in header_positions
+    }
 
-    for row_index in range(2, sheet.max_row + 1):
-        _style_data_row(sheet, row_index, status_header)
+    for row in sheet.iter_rows(min_row=2):
+        sheet.row_dimensions[row[0].row].height = 15.75
 
-    if sheet.max_row >= 1:
-        sheet.auto_filter.ref = (
-            f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-        )
+        for cell in row:
+            cell.alignment = Alignment(
+                vertical="center",
+                horizontal="left",
+                wrap_text=True,
+            )
+            cell.fill = PatternFill(fill_type=None)
+
+            header = str(sheet.cell(1, cell.column).value or "")
+            if header in {
+                "post_order",
+                "attempt",
+                "retryable",
+                "published_at",
+                "timestamp",
+                "post_status",
+                "status",
+            }:
+                cell.alignment = Alignment(
+                    vertical="center",
+                    horizontal="center",
+                    wrap_text=True,
+                )
+
+            if cell.column in date_indices and isinstance(cell.value, datetime):
+                cell.number_format = "dd/mm/yyyy hh:mm:ss"
+
+        if status_index:
+            status_cell = sheet.cell(row[0].row, status_index)
+            colors = _STATUS_COLORS.get(str(status_cell.value or "").strip())
+            if colors:
+                _font_with(status_cell, bold=True, color=colors[1])
+                status_cell.alignment = Alignment(
+                    vertical="center",
+                    horizontal="center",
+                    wrap_text=True,
+                )
 
 
 def _format_workbook(
-    path: Path, sheet_name: str, widths: dict, status_header: str
+    path: Path,
+    sheet_name: str,
+    widths: dict,
+    status_header: str | None = None,
 ) -> None:
     workbook = load_workbook(path)
     try:
         if sheet_name in workbook.sheetnames:
-            _style_worksheet(workbook[sheet_name], widths, status_header)
+            _style_sheet(workbook[sheet_name], widths, status_header)
             workbook.save(path)
     finally:
         workbook.close()
@@ -297,7 +279,7 @@ class PageAutoReport:
         self._ensure_result_file()
         self._ensure_devlog_file()
 
-        # Apply formatting to both existing and newly-created workbooks.
+        # Apply the legacy formatting to existing and newly-created workbooks.
         _format_workbook(
             self.result_path,
             "Results",
@@ -309,6 +291,11 @@ class PageAutoReport:
             "DevLog",
             _DEVLOG_WIDTHS,
             "status",
+        )
+        _format_workbook(
+            self.devlog_path,
+            "RUN_STATE",
+            {"key": 32, "value": 42},
         )
 
         self.results = self._read_results()
@@ -487,12 +474,7 @@ class PageAutoReport:
                 if header in values:
                     sheet.cell(target_row, column, values[header])
 
-            _style_data_row(sheet, target_row, "post_status")
-            if sheet.max_row >= 1 and sheet.max_column >= 1:
-                sheet.auto_filter.ref = (
-                    f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-                )
-
+            _style_sheet(sheet, _RESULT_WIDTHS, "post_status")
             workbook.save(self.result_path)
 
             self.results[task_id] = {
@@ -548,11 +530,7 @@ class PageAutoReport:
         try:
             sheet = workbook["DevLog"]
             sheet.append(values)
-            _style_data_row(sheet, sheet.max_row, "status")
-            if sheet.max_row >= 1 and sheet.max_column >= 1:
-                sheet.auto_filter.ref = (
-                    f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-                )
+            _style_sheet(sheet, _DEVLOG_WIDTHS, "status")
             workbook.save(self.devlog_path)
         finally:
             workbook.close()
@@ -630,6 +608,7 @@ class PageAutoReport:
                 sheet.cell(row_index, 1, key)
                 sheet.cell(row_index, 2, value)
 
+            _style_sheet(sheet, {"key": 32, "value": 42})
             workbook.save(self.devlog_path)
         finally:
             workbook.close()

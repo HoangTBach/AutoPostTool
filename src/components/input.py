@@ -40,10 +40,13 @@ class Input(QLineEdit):
         parent=None,
         *,
         mode: InputMode | str | None = None,
+        variant: str | None = None,
     ):
         super().__init__(text, parent)
 
         self.setObjectName("input")
+        self.setProperty("variant", variant or "")
+
         self.password_style = None
         self._mode = InputMode.NORMAL
 

@@ -1,19 +1,23 @@
 import math
 import time
 import uuid
+from datetime import datetime, timedelta
 
 from pathlib import Path
+from urllib.parse import urlsplit
+
 from PySide6.QtCore import QSettings, QThread, Signal
 
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
 from src.configs.path import DATA_DIR
 from src.configs import automation as automation_config
 from src.features.page_posting.adspower import (
+    AdsPowerConnectionError,
     check_connection,
     check_profiles,
     connect_driver,
     get_active_profile,
-    set_credentials,
+    get_profile_debugger_address,
     start_profile,
     stop_profile,
 )
@@ -22,8 +26,16 @@ from src.features.page_posting.excel import (
     load_page_rows,
 )
 from src.features.page_posting.facebook import (
+    FacebookPostError,
     FacebookSwitchError,
-    open_page_link,
+    PublishUnknownError,
+    click_published_post_timestamp,
+    comment_exists_on_opened_post,
+    get_opened_post_url,
+    open_and_verify_post_url,
+    post_comment_on_opened_post,
+    publish_photo,
+    switch_to_page,
 )
 from src.features.page_posting.service import (
     build_page_jobs,
@@ -34,9 +46,11 @@ from src.features.page_posting import validation
 
 from src.utils.cmd_log import cmd_log
 
-# -----  -----
+# ----- Retry Settings -----
 MAX_OPEN_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 2
+MAX_STAGE_ATTEMPTS = 3
+STAGE_RETRY_DELAY_SECONDS = 2
 
 
 def _cmd_separator() -> None:
@@ -71,6 +85,7 @@ def _normalize_row(row: dict) -> dict:
     media = normalized.get("media") or normalized.get("image") or ""
     normalized["media"] = str(media).strip()
     normalized.setdefault("image", normalized["media"])
+    normalized.setdefault("_status_media", normalized["media"])
 
     page_name = normalized.get("page_name") or normalized.get("page") or ""
     normalized["page"] = str(page_name).strip()
@@ -146,11 +161,6 @@ def _resolve_media_paths(
     rows: list[dict],
     media_folder: str | Path | None,
 ) -> tuple[list[dict], list[str]]:
-    """Resolve Excel media filenames against the chosen media directory.
-
-    Rows with missing media are retained and marked invalid so the UI can show
-    the exact Excel row and filename instead of silently dropping them.
-    """
     folder_text = str(media_folder or "").strip()
     folder = Path(folder_text).expanduser() if folder_text else Path(DATA_DIR)
     folder = folder.resolve()
@@ -265,8 +275,6 @@ class PageImportWorker(QThread):
         try:
             file_stamp = get_data_file_stamp()
 
-            # Always re-check media files: the Excel workbook may be unchanged
-            # while files are moved, added, deleted, or a different folder is selected.
             source_rows = load_page_rows()
             resolved_rows, media_errors = _resolve_media_paths(
                 source_rows,
@@ -300,8 +308,6 @@ class PageImportWorker(QThread):
             jobs = build_page_jobs(validated_rows)
             ordered_rows = flatten_page_jobs(jobs)
 
-            # Keep rows with missing media visible in the table. Run is disabled
-            # by the UI whenever validation_errors is non-empty.
             display_rows = ordered_rows + invalid_media_rows
             for row_number, row in enumerate(display_rows, start=1):
                 row["no"] = row_number
@@ -366,8 +372,18 @@ class PagePreflightWorker(QThread):
 
         try:
             cmd_log("INFO", "Checking Page Auto configuration...")
-            check_connection(self.api_key)
-            cmd_log("SUCCESS", "AdsPower API connected")
+            settings = QSettings(
+                QSettings.Format.IniFormat,
+                QSettings.Scope.UserScope,
+                "AutoPostTool",
+                "AutoPostTool",
+            )
+            local_api = str(
+                settings.value("adspower/local_api", ADSPOWER_DEFAULT_URL)
+                or ADSPOWER_DEFAULT_URL
+            ).strip()
+            check_connection(self.api_key, api_url=local_api)
+            cmd_log("SUCCESS", f"AdsPower API connected: {local_api}")
 
             if self.stop_requested:
                 return
@@ -429,6 +445,80 @@ class PageAutoWorker(QThread):
                 "no new Page row will start afterward.",
             )
 
+    def _recover_interrupted_rows(self, report: PageAutoReport) -> None:
+        for row in self._flatten_rows():
+            result = report.get_result(row.get("task_id", ""))
+            status = str(result.get("post_status") or "").strip()
+
+            if status in {"Running", "PublishSubmitting"}:
+                message = (
+                    "Previous run ended after the publish action may have started. "
+                    "The Page must be checked before any new publish attempt."
+                )
+                report.upsert_result(
+                    row,
+                    "PublishUnknown",
+                    published_at=result.get("published_at"),
+                    post_url=result.get("post_url", ""),
+                    error=message,
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"publish:{row.get('post_id', '')}",
+                    "Unknown",
+                    attempt=max(1, report.next_attempt(row) - 1),
+                    error=RuntimeError(message),
+                    retryable=False,
+                )
+                self._emit_rows([row], "Unknown", message)
+
+            elif status == "CommentSending":
+                message = (
+                    "Previous run ended while sending the comment. "
+                    "The existing comment will be checked before retrying."
+                )
+                report.upsert_result(
+                    row,
+                    "CommentUnknown",
+                    published_at=result.get("published_at"),
+                    post_url=result.get("post_url", ""),
+                    error=message,
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"comment:{row.get('post_id', '')}",
+                    "Unknown",
+                    attempt=max(1, report.next_attempt(row) - 1),
+                    error=RuntimeError(message),
+                    retryable=True,
+                )
+                self._emit_rows([row], "Unknown", message)
+
+    def _restore_result_statuses(
+        self,
+        targets: list[dict],
+        report: PageAutoReport,
+    ) -> None:
+        for target in targets:
+            row = target["rows"][0]
+            result = report.get_result(row.get("task_id", ""))
+            status = str(result.get("post_status") or "").strip()
+
+            if status == "Completed":
+                target["_saved_result_status"] = "Completed"
+                self._emit_rows([row], "Done", result.get("error", ""))
+
+            elif status in {"Unknown", "PublishUnknown", "CommentUnknown"}:
+                # These statuses must be reconciled; they are never auto-marked Done.
+                target["_saved_result_status"] = ""
+                self._emit_rows([row], "Unknown", result.get("error", ""))
+
+            else:
+                target["_saved_result_status"] = ""
+                self._emit_rows([row], "Queued")
+
     def run(self):
         _cmd_separator()
         cmd_log("INFO", "Starting Page Auto")
@@ -452,6 +542,8 @@ class PageAutoWorker(QThread):
 
         last_active_order: str | None = None
         run_summary = None
+        run_failed = False
+        resume_wait = None
 
         try:
             targets = self._collect_targets()
@@ -473,6 +565,81 @@ class PageAutoWorker(QThread):
 
             self._configure_adspower()
             report = PageAutoReport()
+            self._recover_interrupted_rows(report)
+            self._restore_result_statuses(targets, report)
+
+            # ----- Restore an interrupted delay, if one exists -----
+            saved_state = report.get_state()
+            saved_wait_type = str(saved_state.get("wait_type") or "").strip().upper()
+            saved_resume_key = str(saved_state.get("resume_target_key") or "").strip()
+            saved_deadline = self._parse_deadline(saved_state.get("wait_deadline"))
+
+            if (
+                saved_wait_type in {"PAGE", "ORDER"}
+                and saved_resume_key
+                and saved_deadline is not None
+            ):
+                resume_index = next(
+                    (
+                        index
+                        for index, item in enumerate(targets)
+                        if item.get("target_key") == saved_resume_key
+                    ),
+                    None,
+                )
+
+                if resume_index is not None:
+                    resume_target = targets[resume_index]
+                    saved_before_order = str(
+                        saved_state.get("wait_before_order") or ""
+                    ).strip()
+                    saved_after_order = str(
+                        saved_state.get("wait_after_order") or ""
+                    ).strip()
+                    saved_after_key = str(
+                        saved_state.get("wait_after_target_key") or ""
+                    ).strip()
+                    current_order = str(resume_target.get("post_order") or "").strip()
+                    previous_target_matches = (
+                        resume_index > 0
+                        and bool(saved_after_key)
+                        and targets[resume_index - 1].get("target_key")
+                        == saved_after_key
+                    )
+                    order_transition_matches = (
+                        saved_wait_type == "PAGE"
+                        and (
+                            not saved_after_order or saved_after_order == current_order
+                        )
+                    ) or (
+                        saved_wait_type == "ORDER"
+                        and (
+                            not saved_after_order or saved_after_order != current_order
+                        )
+                    )
+
+                    if (
+                        previous_target_matches
+                        and order_transition_matches
+                        and (
+                            not saved_before_order
+                            or saved_before_order == current_order
+                        )
+                    ):
+                        targets = targets[resume_index:]
+                        resume_wait = {
+                            "wait_type": saved_wait_type,
+                            "deadline": saved_deadline,
+                        }
+                        cmd_log(
+                            "INFO",
+                            f"Resuming interrupted {saved_wait_type.lower()} delay",
+                        )
+
+            if resume_wait is None:
+                self._clear_wait_state(report, run_status="RUNNING")
+            else:
+                report.set_state({"run_status": "WAITING"})
 
             cmd_log(
                 "INFO",
@@ -482,9 +649,9 @@ class PageAutoWorker(QThread):
             total_data_rows = len(self._flatten_rows())
             unique_page_count = len(
                 {
-                    str(target.get("page_id") or "").strip()
-                    for target in targets
-                    if str(target.get("page_id") or "").strip()
+                    str(row.get("page_id") or "").strip()
+                    for row in self._flatten_rows()
+                    if str(row.get("page_id") or "").strip()
                 }
             )
 
@@ -513,6 +680,9 @@ class PageAutoWorker(QThread):
             remaining_by_order_profile: dict[tuple[str, str], int] = {}
 
             for item in targets:
+                if item.get("_saved_result_status") == "Completed":
+                    continue
+
                 uid = str(item.get("profile_uid") or "").strip()
                 order = str(item.get("post_order") or "").strip() or "unknown"
 
@@ -522,12 +692,35 @@ class PageAutoWorker(QThread):
                         remaining_by_order_profile.get(key, 0) + 1
                     )
 
-            for index, target in enumerate(targets):
+            targets_to_process = targets
+
+            if resume_wait is not None:
+                can_continue = self._wait_until_deadline(
+                    deadline=resume_wait["deadline"],
+                    wait_type=resume_wait["wait_type"],
+                    report=report,
+                )
+
+                if can_continue:
+                    self._clear_wait_state(report, run_status="RUNNING")
+                else:
+                    for pending in targets:
+                        self._emit_rows(
+                            pending["rows"],
+                            "Stopped",
+                            "Stopped by user.",
+                        )
+                    stopped += len(targets)
+                    targets_to_process = []
+
+            for index, target in enumerate(targets_to_process):
                 current_order = str(target.get("post_order") or "").strip() or "unknown"
 
                 if index > 0:
                     previous_order = (
-                        str(targets[index - 1].get("post_order") or "").strip()
+                        str(
+                            targets_to_process[index - 1].get("post_order") or ""
+                        ).strip()
                         or "unknown"
                     )
 
@@ -540,19 +733,28 @@ class PageAutoWorker(QThread):
                             finished_orders,
                         )
 
+                        if previous_order in completed_orders:
+                            self._save_last_completed_order(report, previous_order)
+
                         cmd_log("INFO", "Preparing next Post Order...")
                         _cmd_separator()
 
                         can_continue = self._wait_between_orders(
                             delay_seconds=order_delay_seconds,
+                            report=report,
+                            previous_target=targets_to_process[index - 1],
+                            next_target=target,
                         )
                     else:
                         can_continue = self._wait_between_pages(
                             delay_seconds=page_delay_seconds,
+                            report=report,
+                            previous_target=targets_to_process[index - 1],
+                            next_target=target,
                         )
 
                     if not can_continue:
-                        remaining = targets[index:]
+                        remaining = targets_to_process[index:]
 
                         for pending in remaining:
                             self._emit_rows(
@@ -580,7 +782,7 @@ class PageAutoWorker(QThread):
                         break
 
                 if self.stop_requested:
-                    remaining = targets[index:]
+                    remaining = targets_to_process[index:]
 
                     for pending in remaining:
                         self._emit_rows(
@@ -617,6 +819,13 @@ class PageAutoWorker(QThread):
 
                 target["order_position"] = order_positions[current_order] + 1
                 target["order_total"] = order_totals[current_order]
+
+                saved_status = target.get("_saved_result_status")
+                if saved_status == "Completed":
+                    passed += 1
+                    order_stats[current_order]["success"] += 1
+                    order_positions[current_order] += 1
+                    continue
 
                 profile_uid = str(target.get("profile_uid") or "").strip()
 
@@ -795,24 +1004,43 @@ class PageAutoWorker(QThread):
                     finished_orders,
                 )
 
+                if last_active_order in completed_orders:
+                    self._save_last_completed_order(report, last_active_order)
+
             if (
-                passed + failed == len(targets)
+                passed + failed == len(targets_to_process)
                 and stopped == 0
                 and not self.stop_requested
             ):
                 run_summary = {
-                    "total": len(targets),
+                    "total": len(targets_to_process),
                     "success": passed,
                     "failed": failed,
                     "post_orders": len(completed_orders),
                 }
 
         except Exception as error:
+            run_failed = True
             message = f"Page Auto failed: {error}"
             cmd_log("ERROR", message)
             self.error.emit(message)
 
         finally:
+            if report is not None:
+                try:
+                    if run_summary is not None:
+                        self._clear_wait_state(report, run_status="COMPLETED")
+                    elif self.stop_requested:
+                        # Keep an active delay's deadline and resume target intact.
+                        report.set_state({"run_status": "STOPPED"})
+                    elif run_failed:
+                        report.set_state({"run_status": "FAILED"})
+                except Exception as state_error:
+                    cmd_log(
+                        "ERROR",
+                        f"Could not update Page Auto run state: {state_error}",
+                    )
+
             session_uids = set(sessions)
             self._close_profile_sessions(sessions, report)
 
@@ -989,25 +1217,17 @@ class PageAutoWorker(QThread):
     def _wait_between_pages(
         self,
         delay_seconds: float,
+        report: PageAutoReport,
+        previous_target: dict,
+        next_target: dict,
     ) -> bool:
-        if self.stop_requested:
-            return False
-
-        if delay_seconds <= 0:
-            return True
-
-        deadline = time.monotonic() + delay_seconds
-
-        while not self.stop_requested:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            time.sleep(min(0.5, remaining))
-
-        if self.stop_requested:
-            return False
-
-        return True
+        return self._wait_for_transition(
+            wait_type="PAGE",
+            delay_seconds=delay_seconds,
+            report=report,
+            previous_target=previous_target,
+            next_target=next_target,
+        )
 
     def _wait_interruptibly(self, delay_seconds: float) -> bool:
         deadline = time.monotonic() + max(0.0, float(delay_seconds))
@@ -1021,25 +1241,135 @@ class PageAutoWorker(QThread):
     def _wait_between_orders(
         self,
         delay_seconds: float,
+        report: PageAutoReport,
+        previous_target: dict,
+        next_target: dict,
+    ) -> bool:
+        return self._wait_for_transition(
+            wait_type="ORDER",
+            delay_seconds=delay_seconds,
+            report=report,
+            previous_target=previous_target,
+            next_target=next_target,
+        )
+
+    def _wait_for_transition(
+        self,
+        wait_type: str,
+        delay_seconds: float,
+        report: PageAutoReport,
+        previous_target: dict,
+        next_target: dict,
     ) -> bool:
         if self.stop_requested:
             return False
 
         if delay_seconds <= 0:
+            self._clear_wait_state(report, run_status="RUNNING")
             return True
 
-        deadline = time.monotonic() + delay_seconds
+        deadline = datetime.now().astimezone() + timedelta(seconds=float(delay_seconds))
+        deadline_text = deadline.isoformat()
+        previous_order = str(previous_target.get("post_order") or "").strip()
+        next_order = str(next_target.get("post_order") or "").strip()
+
+        state = {
+            "run_status": "WAITING",
+            "wait_type": wait_type,
+            "wait_deadline": deadline_text,
+            "resume_target_key": next_target["target_key"],
+            "wait_after_target_key": previous_target["target_key"],
+            "wait_before_target_key": next_target["target_key"],
+            "wait_after_order": previous_order,
+            "wait_before_order": next_order,
+            "next_page_at": deadline_text if wait_type == "PAGE" else None,
+            "next_order_at": deadline_text if wait_type == "ORDER" else None,
+        }
+
+        if wait_type == "ORDER":
+            completed_order = self._order_state_value(previous_order)
+            if completed_order is not None:
+                state["last_completed_order"] = completed_order
+
+        report.set_state(state)
+        return self._wait_until_deadline(
+            deadline=deadline,
+            wait_type=wait_type,
+            report=report,
+        )
+
+    def _wait_until_deadline(
+        self,
+        deadline: datetime,
+        wait_type: str,
+        report: PageAutoReport,
+    ) -> bool:
+        report.set_state({"run_status": "WAITING"})
 
         while not self.stop_requested:
-            remaining = deadline - time.monotonic()
+            remaining = (deadline - datetime.now().astimezone()).total_seconds()
             if remaining <= 0:
                 break
             time.sleep(min(0.5, remaining))
 
         if self.stop_requested:
+            # Keep the original absolute deadline for the next Run.
+            report.set_state({"run_status": "STOPPED"})
+            cmd_log(
+                "INFO",
+                f"Stopped during {wait_type.lower()} delay; remaining time saved",
+            )
             return False
 
+        self._clear_wait_state(report, run_status="RUNNING")
         return True
+
+    @staticmethod
+    def _parse_deadline(value) -> datetime | None:
+        if not value:
+            return None
+
+        try:
+            deadline = datetime.fromisoformat(str(value))
+        except (TypeError, ValueError):
+            return None
+
+        if deadline.tzinfo is None:
+            return deadline.astimezone()
+        return deadline.astimezone()
+
+    @staticmethod
+    def _order_state_value(order_key: str):
+        try:
+            return int(float(order_key))
+        except (TypeError, ValueError):
+            return None
+
+    def _save_last_completed_order(
+        self,
+        report: PageAutoReport,
+        order_key: str,
+    ) -> None:
+        completed_order = self._order_state_value(order_key)
+        if completed_order is not None:
+            report.set_state({"last_completed_order": completed_order})
+
+    @staticmethod
+    def _clear_wait_state(report: PageAutoReport, run_status: str) -> None:
+        report.set_state(
+            {
+                "run_status": run_status,
+                "wait_type": "",
+                "wait_deadline": None,
+                "resume_target_key": "",
+                "wait_after_target_key": "",
+                "wait_before_target_key": "",
+                "wait_after_order": "",
+                "wait_before_order": "",
+                "next_page_at": None,
+                "next_order_at": None,
+            }
+        )
 
     def _configure_adspower(self):
         settings = QSettings(
@@ -1064,10 +1394,8 @@ class PageAutoWorker(QThread):
                 "AdsPower API key is missing. " "Connect AdsPower in Settings first."
             )
 
-        set_credentials(
-            api_key=api_key,
-            api_url=local_api,
-        )
+        check_connection(api_key, api_url=local_api)
+        cmd_log("SUCCESS", f"AdsPower API connected: {local_api}")
 
     def _flatten_rows(self) -> list[dict]:
         rows = []
@@ -1089,9 +1417,22 @@ class PageAutoWorker(QThread):
         targets = []
 
         for index, row in enumerate(self._flatten_rows(), start=1):
+            task_key = str(row.get("task_id") or "").strip()
+            if not task_key:
+                task_key = "|".join(
+                    (
+                        str(row.get("post_id") or "").strip(),
+                        str(row.get("post_order") or "").strip(),
+                        str(row.get("profile_uid") or "").strip(),
+                        str(row.get("page_id") or "").strip(),
+                        str(index),
+                    )
+                )
+
             targets.append(
                 {
                     "row_number": index,
+                    "target_key": task_key,
                     "profile_uid": str(row.get("profile_uid") or "").strip(),
                     "profile_id": str(row.get("profile_id") or "").strip(),
                     "profile_name": str(row.get("profile_name") or "").strip(),
@@ -1113,11 +1454,51 @@ class PageAutoWorker(QThread):
             return False
 
         try:
-            driver.execute_script("return 1")
+            if not driver.window_handles:
+                return False
+            return driver.execute_script("return 1") == 1
         except Exception:
             return False
 
-        return True
+    @staticmethod
+    def _normalize_debugger_address(address: str) -> tuple[str, int] | None:
+        value = str(address or "").strip()
+        if not value:
+            return None
+
+        parsed = urlsplit(value if "://" in value else f"//{value}")
+        host = str(parsed.hostname or "").strip().lower()
+        port = parsed.port
+        if not host or port is None:
+            return None
+        if host in {"localhost", "::1"}:
+            host = "127.0.0.1"
+        return host, port
+
+    @classmethod
+    def _driver_matches_profile(cls, driver, profile_data: dict) -> bool:
+        """Check that a live Selenium session is attached to this profile endpoint."""
+        expected_address = get_profile_debugger_address(profile_data)
+        capabilities = getattr(driver, "capabilities", {}) or {}
+        chrome_options = capabilities.get("goog:chromeOptions") or {}
+        actual_address = str(chrome_options.get("debuggerAddress") or "").strip()
+
+        # Some older ChromeDriver builds omit debuggerAddress from capabilities.
+        # In that case, use the live-session checks rather than rejecting it.
+        if not actual_address:
+            return cls._driver_is_usable(driver)
+
+        expected = cls._normalize_debugger_address(expected_address)
+        actual = cls._normalize_debugger_address(actual_address)
+        if expected is None or actual is None:
+            return cls._driver_is_usable(driver)
+        return expected == actual
+
+    @staticmethod
+    def _driver_debugger_address(driver) -> str:
+        capabilities = getattr(driver, "capabilities", {}) or {}
+        chrome_options = capabilities.get("goog:chromeOptions") or {}
+        return str(chrome_options.get("debuggerAddress") or "unknown").strip()
 
     @staticmethod
     def _detach_stale_driver(profile_uid: str, driver) -> None:
@@ -1145,39 +1526,40 @@ class PageAutoWorker(QThread):
         if session is not None:
             driver = session.get("driver")
             active_profile = None
-            active_check_failed = False
+            active_check_error = None
 
             try:
                 active_profile = get_active_profile(profile_uid)
             except Exception as error:
-                active_check_failed = True
-                if self._driver_is_usable(driver):
-                    cmd_log(
-                        "WARNING",
-                        f"Could not verify AdsPower profile {profile_uid}, but its "
-                        f"Selenium driver is still responding; reusing it: {error}",
-                    )
+                active_check_error = error
+
+            driver_usable = self._driver_is_usable(driver)
+            if active_profile and driver_usable:
+                if self._driver_matches_profile(driver, active_profile):
                     return session
 
+                expected = get_profile_debugger_address(active_profile)
+                actual = self._driver_debugger_address(driver)
                 cmd_log(
                     "WARNING",
-                    f"Could not verify AdsPower profile {profile_uid} and its "
-                    f"Selenium driver is unresponsive: {error}",
+                    f"Selenium profile binding mismatch for AdsPower UID {profile_uid}: "
+                    f"expected debugger {expected}, connected debugger {actual}. "
+                    "Reconnecting to the active profile.",
+                )
+            elif active_check_error is not None:
+                cmd_log(
+                    "WARNING",
+                    f"Could not verify active AdsPower profile {profile_uid}: "
+                    f"{active_check_error}. Reconnecting instead of reusing an "
+                    "unverified browser session.",
+                )
+            else:
+                cmd_log(
+                    "WARNING",
+                    f"AdsPower profile {profile_uid} is not active or its Selenium "
+                    "driver is unresponsive. Reopening/reconnecting.",
                 )
 
-            if active_profile and self._driver_is_usable(driver):
-                return session
-
-            reason = (
-                "active profile check failed / driver is unresponsive"
-                if active_check_failed
-                else "profile was closed or the Selenium driver stopped responding"
-            )
-            cmd_log(
-                "WARNING",
-                f"AdsPower profile {profile_uid} needs recovery because {reason}. "
-                "Detaching the old driver and reopening/reconnecting.",
-            )
             self._detach_stale_driver(profile_uid, driver)
             sessions.pop(profile_uid, None)
 
@@ -1216,8 +1598,27 @@ class PageAutoWorker(QThread):
                     "Started",
                 )
 
+            returned_uid = str(profile_data.get("user_id") or "").strip()
+            if returned_uid and returned_uid != profile_uid:
+                raise AdsPowerConnectionError(
+                    f"AdsPower returned profile UID {returned_uid}, but Page Auto "
+                    f"requested {profile_uid}. Check the profile_uid column in Excel."
+                )
+
             stage = "browser:attach"
             driver = connect_driver(profile_data)
+            if not self._driver_matches_profile(driver, profile_data):
+                raise AdsPowerConnectionError(
+                    f"Selenium connected to debugger {self._driver_debugger_address(driver)}, "
+                    f"but AdsPower profile {profile_uid} uses "
+                    f"{get_profile_debugger_address(profile_data)}."
+                )
+
+            cmd_log(
+                "INFO",
+                f"Selenium attached to AdsPower UID {profile_uid}; debugger: "
+                f"{self._driver_debugger_address(driver)}; URL: {driver.current_url}",
+            )
             report.log_event(
                 row,
                 self.run_id,
@@ -1229,6 +1630,8 @@ class PageAutoWorker(QThread):
                 "driver": driver,
                 "last_row": row,
                 "profile_started": profile_started,
+                "profile_uid": profile_uid,
+                "profile_data": profile_data,
             }
 
         except Exception as error:
@@ -1278,14 +1681,20 @@ class PageAutoWorker(QThread):
         for profile_uid, session in list(sessions.items()):
             driver = session.get("driver")
             row = session.get("last_row") or {}
+            profile_started = bool(session.get("profile_started"))
 
             if driver is not None:
                 try:
-                    driver.quit()
+                    if profile_started:
+                        driver.quit()
+                    else:
+                        # Detach our WebDriver connection without closing a profile
+                        # that was already open before Page Auto attached to it.
+                        driver.service.stop()
                 except Exception as error:
                     cmd_log(
                         "WARNING",
-                        f"Could not quit Selenium driver for profile "
+                        f"Could not close Selenium connection for profile "
                         f"{profile_uid}: {error}",
                     )
                     try:
@@ -1311,10 +1720,17 @@ class PageAutoWorker(QThread):
                                 row,
                                 self.run_id,
                                 "browser:close",
-                                "Closed",
+                                "Closed" if profile_started else "Detached",
                             )
                         except Exception:
                             pass
+
+            if not profile_started:
+                cmd_log(
+                    "INFO",
+                    f"Leaving pre-existing AdsPower profile open: {profile_uid}",
+                )
+                continue
 
             try:
                 stop_profile(profile_uid)
@@ -1351,14 +1767,9 @@ class PageAutoWorker(QThread):
         self,
         target: dict,
         reason: str,
-        action: str = "open Page link",
+        action: str = "switch to Facebook Page",
     ) -> None:
-        position = target.get("order_position", target.get("row_number", "?"))
-        total = target.get("order_total", "?")
-        page_name = target.get("page_name") or target.get("page_id") or "Unknown Page"
-        row_number = target.get("row_number", "?")
-        cmd_log("ERROR", f"[{position}/{total}] Failed to {action}")
-        cmd_log("ERROR", f"Page: {page_name} | Data row: {row_number}")
+        cmd_log("ERROR", f"Failed to {action}")
         cmd_log("ERROR", f"Reason: {reason}")
         cmd_log("INFO", "Skipping current Page")
 
@@ -1377,7 +1788,7 @@ class PageAutoWorker(QThread):
         page_name = target["page_name"]
         page_link = target["page_link"]
 
-        action = f"open_page_link:{page_link or page_id or page_name}"
+        action = f"switch_to_page:{page_link or page_id or page_name}"
 
         if not page_link:
             error = FacebookSwitchError(
@@ -1385,13 +1796,8 @@ class PageAutoWorker(QThread):
                 retryable=False,
             )
             report.log_event(
-                row,
-                self.run_id,
-                action,
-                "Failed",
-                attempt=1,
-                error=error,
-                retryable=False,
+                row, self.run_id, action, "Failed",
+                attempt=1, error=error, retryable=False,
             )
             self._log_target_failure(target, str(error))
             self._emit_rows(rows, "Error", str(error))
@@ -1403,13 +1809,8 @@ class PageAutoWorker(QThread):
                 retryable=False,
             )
             report.log_event(
-                row,
-                self.run_id,
-                action,
-                "Failed",
-                attempt=1,
-                error=error,
-                retryable=False,
+                row, self.run_id, action, "Failed",
+                attempt=1, error=error, retryable=False,
             )
             self._log_target_failure(target, str(error))
             self._emit_rows(rows, "Error", str(error))
@@ -1421,13 +1822,8 @@ class PageAutoWorker(QThread):
                 retryable=False,
             )
             report.log_event(
-                row,
-                self.run_id,
-                action,
-                "Failed",
-                attempt=1,
-                error=error,
-                retryable=False,
+                row, self.run_id, action, "Failed",
+                attempt=1, error=error, retryable=False,
             )
             self._log_target_failure(target, str(error))
             self._emit_rows(rows, "Error", str(error))
@@ -1435,22 +1831,22 @@ class PageAutoWorker(QThread):
 
         for attempt in range(1, MAX_OPEN_ATTEMPTS + 1):
             if self.stop_requested:
-                self._emit_rows(
-                    rows,
-                    "Stopped",
-                    "Stopped by user.",
-                )
+                self._emit_rows(rows, "Stopped", "Stopped by user.")
                 return "stopped"
 
             try:
-                open_page_link(driver, page_link)
+                switch_to_page(
+                    driver,
+                    page_link,
+                    page_id=page_id,
+                    page_name=page_name,
+                )
 
             except Exception as error:
                 retryable = (
                     bool(getattr(error, "retryable", False))
                     and attempt < MAX_OPEN_ATTEMPTS
                 )
-
                 report.log_event(
                     row,
                     self.run_id,
@@ -1462,32 +1858,31 @@ class PageAutoWorker(QThread):
                 )
 
                 if retryable:
+                    cmd_log(
+                        "WARNING",
+                        f"Page switch failed; retrying ({attempt + 1}/{MAX_OPEN_ATTEMPTS})",
+                    )
                     if not self._wait_interruptibly(RETRY_DELAY_SECONDS):
                         self._emit_rows(
                             rows,
                             "Stopped",
-                            "Stopped by user before the retry could run.",
+                            "Stopped by user before the Page switch retry.",
                         )
                         return "stopped"
 
-                    if sessions is not None and profile_uid:
+                    if sessions is not None:
                         try:
-                            recovered_session = self._ensure_profile_session(
-                                profile_uid,
-                                row,
-                                report,
-                                sessions,
+                            recovered = self._ensure_profile_session(
+                                profile_uid, row, report, sessions
                             )
+                            recovered["last_row"] = row
+                            driver = recovered["driver"]
                         except Exception as recovery_error:
                             cmd_log(
                                 "WARNING",
-                                f"Could not recover AdsPower profile {profile_uid} "
-                                f"after a Page navigation failure: {recovery_error}",
+                                f"Could not recover AdsPower profile {profile_uid}: "
+                                f"{recovery_error}",
                             )
-                        else:
-                            recovered_session["last_row"] = row
-                            driver = recovered_session["driver"]
-
                     continue
 
                 self._log_target_failure(target, str(error))
@@ -1496,14 +1891,669 @@ class PageAutoWorker(QThread):
 
             else:
                 report.log_event(
+                    row, self.run_id, action, "Success", attempt=attempt
+                )
+                cmd_log(
+                    "SUCCESS",
+                    f"Switched to Facebook Page: {page_name or page_id}",
+                )
+                break
+        else:
+            return "failed"
+
+        original_handle = None
+        original_handles = set()
+        try:
+            original_handle = driver.current_window_handle
+            original_handles = set(driver.window_handles)
+        except Exception:
+            pass
+
+        try:
+            return self._process_post_pipeline(target, report, driver)
+        finally:
+            # The old permalink workflow may open the post in a new tab.
+            try:
+                current_handles = set(driver.window_handles)
+                for handle in current_handles - original_handles:
+                    driver.switch_to.window(handle)
+                    driver.close()
+
+                if original_handle and original_handle in driver.window_handles:
+                    driver.switch_to.window(original_handle)
+                elif original_handles:
+                    remaining = set(driver.window_handles) & original_handles
+                    if remaining:
+                        driver.switch_to.window(next(iter(remaining)))
+            except Exception:
+                pass
+
+    def _process_post_pipeline(
+        self,
+        target: dict,
+        report: PageAutoReport,
+        driver,
+    ) -> str:
+        row = target["rows"][0]
+        task_id = row.get("task_id", "")
+        post_id = str(row.get("post_id") or task_id or "unknown")
+        caption = str(row.get("caption") or "").strip()
+        comment = str(row.get("comment") or "").strip()
+        page_link = str(row.get("page_link") or target.get("page_link") or "").strip()
+
+        result = report.get_result(task_id)
+        status = str(result.get("post_status") or "").strip()
+        post_url = str(result.get("post_url") or "").strip()
+        published_at = result.get("published_at")
+
+        if status == "Completed":
+            self._emit_rows([row], "Done")
+            return "passed"
+
+        # ----- Publish -----
+        publish_completed_statuses = {
+            "Published",
+            "UrlPending",
+            "UrlVerified",
+            "CommentPending",
+            "CommentSending",
+            "CommentUnknown",
+        }
+
+        legacy_comment_unknown = status == "Unknown" and bool(post_url)
+        comment_recovery_required = status in {
+            "CommentSending",
+            "CommentUnknown",
+        } or legacy_comment_unknown
+
+        if status in {"Running", "PublishSubmitting", "PublishUnknown", "Unknown"}:
+            # An earlier Post click may have reached Facebook. Search for the post;
+            # never call publish_photo again while the result is ambiguous.
+            cmd_log(
+                "WARNING",
+                f"Checking whether post {post_id} was already published",
+            )
+            try:
+                if post_url:
+                    try:
+                        open_and_verify_post_url(driver, post_url, caption)
+                    except FacebookPostError:
+                        post_url = ""
+
+                if not post_url:
+                    click_published_post_timestamp(
+                        driver,
+                        caption,
+                        attempts=1,
+                        page_link=page_link,
+                    )
+                    post_url = get_opened_post_url(driver)
+
+                published_at = published_at or datetime.now().astimezone().replace(
+                    tzinfo=None
+                )
+                recovered_status = (
+                    "CommentUnknown" if legacy_comment_unknown else "Published"
+                )
+                report.upsert_result(
+                    row,
+                    recovered_status,
+                    published_at=published_at,
+                    post_url=post_url,
+                    error="",
+                )
+                report.log_event(
                     row,
                     self.run_id,
-                    action,
+                    f"publish:{post_id}",
+                    "Recovered",
+                    attempt=1,
+                    retryable=False,
+                )
+                status = recovered_status
+
+            except Exception as error:
+                message = (
+                    "Publish result is still uncertain. The post was not "
+                    "submitted again to avoid creating a duplicate. "
+                    f"Verification: {error}"
+                )
+                report.upsert_result(
+                    row,
+                    "PublishUnknown",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error=message,
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"publish:{post_id}",
+                    "Unknown",
+                    attempt=1,
+                    error=error,
+                    retryable=False,
+                )
+                cmd_log("ERROR", f"Post {post_id}: publish result is unknown")
+                self._emit_rows([row], "Unknown", message)
+                return "failed"
+
+        if status not in publish_completed_statuses and status != "Published":
+            for attempt in range(1, MAX_STAGE_ATTEMPTS + 1):
+                if self.stop_requested:
+                    self._emit_rows([row], "Stopped", "Stopped by user.")
+                    return "stopped"
+
+                submit_started = {"value": False}
+
+                def mark_submit_started():
+                    submit_started["value"] = True
+                    report.upsert_result(
+                        row,
+                        "PublishSubmitting",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"publish:{post_id}",
+                        "Submitting",
+                        attempt=attempt,
+                        retryable=False,
+                    )
+
+                report.upsert_result(
+                    row,
+                    "PreparingPublish",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error="",
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"publish:{post_id}",
+                    "Running",
+                    attempt=attempt,
+                    retryable=True,
+                )
+                cmd_log("INFO", f"Publishing post {post_id}")
+
+                try:
+                    publish_photo(
+                        driver,
+                        row,
+                        before_submit=mark_submit_started,
+                    )
+
+                except PublishUnknownError as error:
+                    # The Post button was attempted. Reconcile by locating the
+                    # expected caption; do not blindly retry the publication.
+                    try:
+                        click_published_post_timestamp(
+                            driver,
+                            caption,
+                            attempts=1,
+                            page_link=page_link,
+                        )
+                        post_url = get_opened_post_url(driver)
+                    except Exception as verify_error:
+                        message = (
+                            "Facebook may have accepted the Post click, but "
+                            "publication could not be verified. Do not retry "
+                            "publishing until the Page is checked. "
+                            f"Details: {verify_error}"
+                        )
+                        report.upsert_result(
+                            row,
+                            "PublishUnknown",
+                            published_at=published_at,
+                            post_url=post_url,
+                            error=message,
+                        )
+                        report.log_event(
+                            row,
+                            self.run_id,
+                            f"publish:{post_id}",
+                            "Unknown",
+                            attempt=attempt,
+                            error=error,
+                            retryable=False,
+                        )
+                        cmd_log(
+                            "ERROR",
+                            f"Post {post_id}: Post click outcome is unknown",
+                        )
+                        self._emit_rows([row], "Unknown", message)
+                        return "failed"
+
+                    published_at = datetime.now().astimezone().replace(tzinfo=None)
+                    report.upsert_result(
+                        row,
+                        "Published",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"publish:{post_id}",
+                        "Recovered",
+                        attempt=attempt,
+                        retryable=False,
+                    )
+                    status = "Published"
+                    break
+
+                except Exception as error:
+                    retryable = (
+                        bool(getattr(error, "retryable", False))
+                        and not submit_started["value"]
+                        and attempt < MAX_STAGE_ATTEMPTS
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"publish:{post_id}",
+                        "Retrying" if retryable else "Failed",
+                        attempt=attempt,
+                        error=error,
+                        retryable=retryable,
+                    )
+
+                    if retryable:
+                        cmd_log(
+                            "WARNING",
+                            f"Publish preparation failed; retrying "
+                            f"({attempt + 1}/{MAX_STAGE_ATTEMPTS})",
+                        )
+                        if not self._wait_interruptibly(STAGE_RETRY_DELAY_SECONDS):
+                            self._emit_rows(
+                                [row],
+                                "Stopped",
+                                "Stopped before the publish retry.",
+                            )
+                            return "stopped"
+                        continue
+
+                    final_status = (
+                        "PublishUnknown" if submit_started["value"] else "Failed"
+                    )
+                    message = (
+                        "Publish result is uncertain; verify the Page before "
+                        "retrying."
+                        if submit_started["value"]
+                        else f"Failed to prepare the post: {error}"
+                    )
+                    report.upsert_result(
+                        row,
+                        final_status,
+                        published_at=published_at,
+                        post_url=post_url,
+                        error=message,
+                    )
+                    cmd_log("ERROR", f"Post {post_id}: {message}")
+                    self._emit_rows(
+                        [row],
+                        "Unknown" if submit_started["value"] else "Error",
+                        message,
+                    )
+                    return "failed"
+
+                else:
+                    published_at = datetime.now().astimezone().replace(tzinfo=None)
+                    report.upsert_result(
+                        row,
+                        "Published",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"publish:{post_id}",
+                        "Success",
+                        attempt=attempt,
+                    )
+                    cmd_log("SUCCESS", f"Post {post_id} published")
+                    status = "Published"
+                    break
+
+        # ----- Discover and verify post URL -----
+        if (
+            status not in {
+                "UrlVerified",
+                "CommentPending",
+                "CommentSending",
+                "CommentUnknown",
+                "Completed",
+            }
+            or not post_url
+        ):
+            url_error = None
+
+            for attempt in range(1, MAX_STAGE_ATTEMPTS + 1):
+                if self.stop_requested:
+                    self._emit_rows([row], "Stopped", "Stopped by user.")
+                    return "stopped"
+
+                try:
+                    if post_url:
+                        try:
+                            post_url = open_and_verify_post_url(
+                                driver,
+                                post_url,
+                                caption,
+                            )
+                        except FacebookPostError:
+                            post_url = ""
+
+                    if not post_url:
+                        click_published_post_timestamp(
+                            driver,
+                            caption,
+                            attempts=1,
+                            page_link=page_link,
+                        )
+                        post_url = get_opened_post_url(driver)
+                        post_url = open_and_verify_post_url(
+                            driver,
+                            post_url,
+                            caption,
+                        )
+
+                    report.upsert_result(
+                        row,
+                        "UrlVerified",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"url:{post_id}",
+                        "Verified",
+                        attempt=attempt,
+                    )
+                    cmd_log("SUCCESS", f"Post URL verified: {post_url}")
+                    status = "UrlVerified"
+                    break
+
+                except Exception as error:
+                    url_error = error
+                    retryable = bool(getattr(error, "retryable", False))
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"url:{post_id}",
+                        "Retrying" if retryable and attempt < MAX_STAGE_ATTEMPTS else "Failed",
+                        attempt=attempt,
+                        error=error,
+                        retryable=retryable,
+                    )
+
+                    if retryable and attempt < MAX_STAGE_ATTEMPTS:
+                        cmd_log(
+                            "WARNING",
+                            f"Post URL discovery failed; retrying "
+                            f"({attempt + 1}/{MAX_STAGE_ATTEMPTS})",
+                        )
+                        if not self._wait_interruptibly(STAGE_RETRY_DELAY_SECONDS):
+                            self._emit_rows(
+                                [row],
+                                "Stopped",
+                                "Stopped before the URL retry.",
+                            )
+                            return "stopped"
+                        continue
+                    break
+
+            if status != "UrlVerified":
+                message = (
+                    "Post was published, but its permalink could not be "
+                    f"verified. URL discovery can be retried: {url_error}"
+                )
+                report.upsert_result(
+                    row,
+                    "UrlPending",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error=message,
+                )
+                cmd_log("ERROR", f"Post {post_id}: URL discovery failed")
+                self._emit_rows([row], "Error", message)
+                return "failed"
+
+        # Always reopen and verify the saved permalink before commenting.
+        try:
+            post_url = open_and_verify_post_url(driver, post_url, caption)
+        except Exception as error:
+            message = f"Post URL could not be reopened and verified: {error}"
+            report.upsert_result(
+                row,
+                "UrlPending",
+                published_at=published_at,
+                post_url=post_url,
+                error=message,
+            )
+            report.log_event(
+                row,
+                self.run_id,
+                f"url:{post_id}",
+                "Failed",
+                attempt=1,
+                error=error,
+                retryable=bool(getattr(error, "retryable", False)),
+            )
+            cmd_log("ERROR", f"Post {post_id}: saved URL verification failed")
+            self._emit_rows([row], "Error", message)
+            return "failed"
+
+        if not comment:
+            report.log_event(
+                row,
+                self.run_id,
+                f"comment:{post_id}",
+                "Skipped",
+                attempt=1,
+            )
+            report.upsert_result(
+                row,
+                "Completed",
+                published_at=published_at,
+                post_url=post_url,
+                error="",
+            )
+            self._emit_rows([row], "Done")
+            cmd_log("SUCCESS", f"Post {post_id} completed (no comment)")
+            return "passed"
+
+        # ----- Publish and verify comment -----
+        for attempt in range(1, MAX_STAGE_ATTEMPTS + 1):
+            if self.stop_requested:
+                self._emit_rows([row], "Stopped", "Stopped by user.")
+                return "stopped"
+
+            try:
+                # This check makes recovery idempotent after an interrupted Send.
+                if comment_exists_on_opened_post(
+                    driver,
+                    comment,
+                    timeout=12 if comment_recovery_required else 3,
+                ):
+                    report.upsert_result(
+                        row,
+                        "Completed",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"comment:{post_id}",
+                        "Recovered",
+                        attempt=attempt,
+                        retryable=False,
+                    )
+                    self._emit_rows([row], "Done")
+                    cmd_log("SUCCESS", f"Comment already exists for post {post_id}")
+                    return "passed"
+
+                def mark_send_started():
+                    report.upsert_result(
+                        row,
+                        "CommentSending",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"comment:{post_id}",
+                        "Sending",
+                        attempt=attempt,
+                        retryable=False,
+                    )
+
+                report.upsert_result(
+                    row,
+                    "CommentPending",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error="",
+                )
+                confirmed = post_comment_on_opened_post(
+                    driver,
+                    comment,
+                    before_send=mark_send_started,
+                )
+
+                if not confirmed:
+                    raise FacebookPostError(
+                        "Comment was not visually confirmed.",
+                        retryable=True,
+                    )
+
+                report.upsert_result(
+                    row,
+                    "Completed",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error="",
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"comment:{post_id}",
                     "Success",
                     attempt=attempt,
                 )
-                self._emit_rows(rows, "Done")
+                self._emit_rows([row], "Done")
+                cmd_log("SUCCESS", f"Comment published for post {post_id}")
                 return "passed"
+
+            except PublishUnknownError as error:
+                # Send may have succeeded; verify before any second Send.
+                try:
+                    exists = comment_exists_on_opened_post(
+                        driver,
+                        comment,
+                        timeout=15,
+                    )
+                except Exception:
+                    exists = False
+
+                if exists:
+                    report.upsert_result(
+                        row,
+                        "Completed",
+                        published_at=published_at,
+                        post_url=post_url,
+                        error="",
+                    )
+                    report.log_event(
+                        row,
+                        self.run_id,
+                        f"comment:{post_id}",
+                        "Recovered",
+                        attempt=attempt,
+                        error=error,
+                        retryable=False,
+                    )
+                    self._emit_rows([row], "Done")
+                    cmd_log("SUCCESS", f"Comment verified for post {post_id}")
+                    return "passed"
+
+                message = (
+                    "Comment Send was attempted, but Facebook did not confirm "
+                    "whether it was published. The next run will check for an "
+                    "existing comment before any retry."
+                )
+                report.upsert_result(
+                    row,
+                    "CommentUnknown",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error=message,
+                )
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"comment:{post_id}",
+                    "Unknown",
+                    attempt=attempt,
+                    error=error,
+                    retryable=True,
+                )
+                cmd_log("ERROR", f"Post {post_id}: comment result is uncertain")
+                self._emit_rows([row], "Unknown", message)
+                return "failed"
+
+            except Exception as error:
+                retryable = bool(getattr(error, "retryable", False))
+                report.log_event(
+                    row,
+                    self.run_id,
+                    f"comment:{post_id}",
+                    "Retrying" if retryable and attempt < MAX_STAGE_ATTEMPTS else "Failed",
+                    attempt=attempt,
+                    error=error,
+                    retryable=retryable,
+                )
+
+                if retryable and attempt < MAX_STAGE_ATTEMPTS:
+                    cmd_log(
+                        "WARNING",
+                        f"Comment preparation failed; retrying "
+                        f"({attempt + 1}/{MAX_STAGE_ATTEMPTS})",
+                    )
+                    if not self._wait_interruptibly(STAGE_RETRY_DELAY_SECONDS):
+                        self._emit_rows(
+                            [row],
+                            "Stopped",
+                            "Stopped before the comment retry.",
+                        )
+                        return "stopped"
+                    continue
+
+                message = f"Post published, but comment failed: {error}"
+                report.upsert_result(
+                    row,
+                    "CommentPending",
+                    published_at=published_at,
+                    post_url=post_url,
+                    error=message,
+                )
+                cmd_log("ERROR", f"Post {post_id}: comment failed")
+                self._emit_rows([row], "Error", message)
+                return "failed"
 
         return "failed"
 
@@ -1513,6 +2563,10 @@ class PageAutoWorker(QThread):
         ui_status: str,
         error: str = "",
     ):
+        if str(ui_status).strip().lower() == "stopped":
+            ui_status = "Queued"
+            error = ""
+
         for row in rows:
             self.progress.emit(
                 {

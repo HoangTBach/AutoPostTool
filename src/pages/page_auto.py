@@ -18,6 +18,8 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDoubleValidator
 
 from PySide6.QtWidgets import (
+    QFrame,
+    QSizePolicy,
     QHBoxLayout,
     QLabel,
     QGridLayout,
@@ -34,7 +36,7 @@ from src.components.file_path_input import FilePathInput
 from src.components.page_header import PageHeader
 from src.components.table import Table
 from src.components.notification import NotificationManager
-from src.configs.path import MEDIA_DIR, RESULT_DIR
+from src.configs.path import DEVLOG_DIR, MEDIA_DIR
 from src.configs.table import PAGE_TABLE_COLUMNS
 from src.configs.automation import (
     PAGE_AUTO_POST_DELAY,
@@ -148,6 +150,7 @@ class PageAutoPage(QWidget):
             variant="primary",
             color="blue",
         )
+        self.run_button.setVisible(False)
 
         self.stop_button = Button(
             text="Stop",
@@ -487,6 +490,7 @@ class PageAutoPage(QWidget):
         self.media_folder_label = self._create_config_label("Media folder")
         self.media_folder_input = FilePathInput(
             text=media_folder,
+            variant="file_path",
             parent=media_panel,
         )
 
@@ -494,14 +498,20 @@ class PageAutoPage(QWidget):
         self.media_folder_input.browse_button.clicked.connect(self.choose_media_folder)
 
         media_layout.addWidget(
-            self.media_folder_label,
-            0,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
+            self.media_folder_label, 0, 0, Qt.AlignmentFlag.AlignVCenter
         )
         media_layout.addWidget(self.media_folder_input, 0, 1)
 
+        self.config_divider = QFrame(body)
+        self.config_divider.setObjectName("configDivider")
+        self.config_divider.setFixedWidth(1)
+        self.config_divider.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding,
+        )
+
         body_layout.addWidget(timing_panel, 1, Qt.AlignmentFlag.AlignTop)
+        body_layout.addWidget(self.config_divider)
         body_layout.addWidget(media_panel, 1, Qt.AlignmentFlag.AlignTop)
 
         save_layout = QHBoxLayout()
@@ -752,7 +762,7 @@ class PageAutoPage(QWidget):
         has_data = (
             bool(self.page_rows) and bool(self.page_jobs) and not self.validation_errors
         )
-        busy = self.importing or self.running
+        busy = self.running
 
         if hasattr(self, "save_config_button"):
             self.save_config_button.setEnabled(not busy)
@@ -766,6 +776,7 @@ class PageAutoPage(QWidget):
         self.import_button.setEnabled(not busy)
         self.open_button.setEnabled(not busy)
         self.run_button.setVisible(has_data and not busy)
+        self.run_button.setEnabled(has_data and not busy)
 
         self.stop_button.setVisible(self.running)
 
@@ -793,14 +804,6 @@ class PageAutoPage(QWidget):
             self._automation_timer.setInterval(1_000)
             self._automation_timer.timeout.connect(self.update_action_state)
 
-        if not self.running:
-            if self._automation_timer.isActive():
-                self._automation_timer.stop()
-
-            self.automation_card.value_label.setText("--:--")
-            self.automation_card.description_label.setText("Not scheduled")
-            return
-
         if not self._automation_timer.isActive():
             self._automation_timer.start()
 
@@ -809,7 +812,7 @@ class PageAutoPage(QWidget):
 
         if monotonic_now - self._automation_state_last_read >= 5:
             self._automation_state_last_read = monotonic_now
-            state_file = Path(RESULT_DIR) / "PageAuto_DevLog.xlsx"
+            state_file = Path(DEVLOG_DIR) / "PageAuto_DevLog.xlsx"
 
             if not state_file.is_file():
                 self._automation_state_cache = {}
@@ -841,6 +844,7 @@ class PageAutoPage(QWidget):
 
         # ----- Parse Cached RUN_STATE -----
         state = self._automation_state_cache
+        wait_type = str(state.get("wait_type") or "").strip().upper()
 
         try:
             last_completed_order = int(float(state.get("last_completed_order")))
@@ -863,6 +867,18 @@ class PageAutoPage(QWidget):
         except (TypeError, ValueError):
             next_order_at = None
 
+        try:
+            raw_next_page_at = state.get("next_page_at")
+
+            if raw_next_page_at:
+                next_page_at = datetime.fromisoformat(str(raw_next_page_at))
+                next_page_at = next_page_at.astimezone()
+            else:
+                next_page_at = None
+
+        except (TypeError, ValueError):
+            next_page_at = None
+
         # ----- Check Next Post Order -----
         has_next_order = False
 
@@ -880,26 +896,44 @@ class PageAutoPage(QWidget):
         # ----- Update Automation Card -----
         now = datetime.now().astimezone()
 
-        if has_next_order and next_order_at is not None:
-            self.automation_card.value_label.setText(next_order_at.strftime("%H:%M"))
+        if wait_type == "PAGE" and next_page_at is not None:
+            next_deadline = next_page_at
+            description_prefix = "Next Page"
+        elif wait_type == "ORDER" and next_order_at is not None:
+            next_deadline = next_order_at
+            description_prefix = "Next Post Order"
+        elif has_next_order and next_order_at is not None:
+            # Compatibility with RUN_STATE files written by older versions.
+            next_deadline = next_order_at
+            description_prefix = "Next Post Order"
+        else:
+            next_deadline = None
 
-            remaining_seconds = int((next_order_at - now).total_seconds())
+        if next_deadline is not None:
+            self.automation_card.value_label.setText(next_deadline.strftime("%H:%M"))
+
+            remaining_seconds = int((next_deadline - now).total_seconds())
 
             if remaining_seconds > 0:
                 minutes, seconds = divmod(remaining_seconds, 60)
 
                 if minutes:
-                    description = f"Starts in {minutes} min " f"{seconds:02d} sec"
+                    description = (
+                        f"{description_prefix} in {minutes} min " f"{seconds:02d} sec"
+                    )
                 else:
-                    description = f"Starts in {seconds} sec"
+                    description = f"{description_prefix} in {seconds} sec"
             else:
-                description = "Running now"
+                description = "Continuing now" if self.running else "Ready to continue"
 
             self.automation_card.description_label.setText(description)
 
         else:
             self.automation_card.value_label.setText("--:--")
             self.automation_card.description_label.setText("Not scheduled")
+
+            if not self.running and self._automation_timer.isActive():
+                self._automation_timer.stop()
 
     # ----- Open Result Folder -----
     def open_result_folder(self):

@@ -29,6 +29,14 @@ _TRANSIENT_ERRORS = (
     "timeout",
     "try again",
     "connection refused",
+    "not ready",
+    "missing ws.selenium",
+    "missing webdriver",
+    "no selenium address",
+    "no webdriver path",
+    "already open",
+    "already running",
+    "already started",
 )
 
 _api_key = ""
@@ -167,7 +175,7 @@ def check_connection(
     api_key: str,
     api_url: str = ADSPOWER_DEFAULT_URL,
 ) -> bool:
-    set_credentials(api_key, api_url=ADSPOWER_DEFAULT_URL)
+    set_credentials(api_key, api_url=api_url)
 
     data = _request(
         "GET",
@@ -264,42 +272,59 @@ def check_profiles(profile_uids: list[str]) -> list[str]:
 
 # ----- Active Profile -----
 def get_active_profile(profile_uid: str) -> dict | None:
-    """Return connection data for an already-open local profile, if any.
+    """Return connection data for an already-open local AdsPower profile.
 
-    Uses AdsPower's local-active endpoint so an existing profile can be attached
-    to without calling the browser/start endpoint again.
+    If AdsPower reports the profile as active before its Selenium endpoint is
+    ready, poll briefly rather than failing immediately. This helps on slower
+    machines and after the profile has just been opened.
     """
     profile_uid = str(profile_uid or "").strip()
     if not profile_uid:
         raise AdsPowerError("AdsPower profile UID is empty.")
 
-    data = _request("GET", "/api/v1/browser/local-active")
-    profiles = data.get("list")
-    if not isinstance(profiles, list):
-        raise AdsPowerError(
-            "AdsPower returned an invalid active-browser list from "
-            "/api/v1/browser/local-active."
+    attempts = 8
+    delay_seconds = 0.75
+    missing_fields: list[str] = []
+
+    for attempt in range(1, attempts + 1):
+        data = _request("GET", "/api/v1/browser/local-active")
+        profiles = data.get("list")
+        if not isinstance(profiles, list):
+            raise AdsPowerError(
+                "AdsPower returned an invalid active-browser list from "
+                "/api/v1/browser/local-active."
+            )
+
+        active_profile = next(
+            (
+                profile
+                for profile in profiles
+                if isinstance(profile, dict)
+                and str(profile.get("user_id") or "").strip() == profile_uid
+            ),
+            None,
         )
+        if active_profile is None:
+            return None
 
-    for profile in profiles:
-        if not isinstance(profile, dict):
-            continue
-        active_uid = str(profile.get("user_id") or "").strip()
-        if active_uid != profile_uid:
-            continue
+        ws = active_profile.get("ws")
+        missing_fields = []
+        if not isinstance(ws, dict) or not str(ws.get("selenium") or "").strip():
+            missing_fields.append("ws.selenium")
+        if not str(active_profile.get("webdriver") or "").strip():
+            missing_fields.append("webdriver")
 
-        ws = profile.get("ws")
-        if not isinstance(ws, dict) or not ws.get("selenium"):
-            raise AdsPowerConnectionError(
-                f"Active AdsPower profile {profile_uid} has no Selenium address."
-            )
-        if not profile.get("webdriver"):
-            raise AdsPowerConnectionError(
-                f"Active AdsPower profile {profile_uid} has no WebDriver path."
-            )
-        return profile
+        if not missing_fields:
+            return active_profile
 
-    return None
+        if attempt < attempts:
+            time.sleep(delay_seconds)
+
+    raise AdsPowerConnectionError(
+        f"AdsPower profile {profile_uid} is active but its Selenium connection "
+        f"is not ready after {attempts} checks; missing: {', '.join(missing_fields)}. "
+        "Wait for the profile browser to finish starting, then retry."
+    )
 
 
 # ----- Profile -----
@@ -318,18 +343,43 @@ def start_profile(profile_uid: str) -> dict:
             )
 
             ws = profile_data.get("ws")
+            has_selenium = isinstance(ws, dict) and bool(
+                str(ws.get("selenium") or "").strip()
+            )
+            has_webdriver = bool(str(profile_data.get("webdriver") or "").strip())
 
-            if not isinstance(ws, dict) or not ws.get("selenium"):
-                raise AdsPowerError("AdsPower response is missing ws.selenium.")
+            if has_selenium and has_webdriver:
+                return profile_data
 
-            if not profile_data.get("webdriver"):
-                raise AdsPowerError("AdsPower response is missing webdriver path.")
+            active_profile = get_active_profile(profile_uid)
+            if active_profile:
+                return active_profile
 
-            return profile_data
+            missing = []
+            if not has_selenium:
+                missing.append("ws.selenium")
+            if not has_webdriver:
+                missing.append("webdriver")
+            raise AdsPowerConnectionError(
+                f"AdsPower profile {profile_uid} is not ready; missing "
+                f"{', '.join(missing)}."
+            )
 
         except AdsPowerError as exc:
             message = str(exc).lower()
             is_transient = any(keyword in message for keyword in _TRANSIENT_ERRORS)
+
+            if any(
+                keyword in message
+                for keyword in ("already open", "already running", "already started")
+            ):
+                try:
+                    active_profile = get_active_profile(profile_uid)
+                except AdsPowerError:
+                    active_profile = None
+                if active_profile:
+                    return active_profile
+                is_transient = True
 
             if not is_transient or attempt >= PROFILE_START_ATTEMPTS:
                 raise
@@ -386,6 +436,28 @@ def _get_debugger_address(profile_data: dict) -> str:
     )
 
 
+def get_profile_debugger_address(profile_data: dict) -> str:
+    """Return the debugger host:port for a profile returned by AdsPower."""
+    return _get_debugger_address(profile_data)
+
+
+def _normalize_debugger_address(address: str) -> tuple[str, int] | None:
+    value = str(address or "").strip()
+    if not value:
+        return None
+
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = str(parsed.hostname or "").strip().lower()
+    port = parsed.port
+    if not host or port is None:
+        return None
+
+    if host in {"localhost", "::1"}:
+        host = "127.0.0.1"
+
+    return host, port
+
+
 def connect_driver(profile_data: dict):
     if not isinstance(profile_data, dict):
         raise AdsPowerConnectionError("Invalid AdsPower profile data.")
@@ -425,6 +497,22 @@ def connect_driver(profile_data: dict):
 
         if not driver.window_handles:
             raise AdsPowerConnectionError("Connected browser has no available window.")
+
+        driver.execute_script("return 1")
+        capabilities = getattr(driver, "capabilities", {}) or {}
+        chrome_options = capabilities.get("goog:chromeOptions") or {}
+        attached_address = str(chrome_options.get("debuggerAddress") or "").strip()
+        expected_address = _get_debugger_address(profile_data)
+
+        if attached_address:
+            expected = _normalize_debugger_address(expected_address)
+            attached = _normalize_debugger_address(attached_address)
+            if expected and attached and expected != attached:
+                raise AdsPowerConnectionError(
+                    "Selenium attached to a different browser debugger than the "
+                    f"AdsPower profile requested. Expected {expected_address}; "
+                    f"connected to {attached_address}."
+                )
 
         return driver
 
