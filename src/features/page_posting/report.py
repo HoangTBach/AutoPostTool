@@ -1,13 +1,14 @@
-import traceback as traceback_module
 import zipfile
 from copy import copy
+
 from datetime import datetime
 from pathlib import Path
+import traceback as traceback_module
 
-from openpyxl import Workbook, load_workbook  # type: ignore
-from openpyxl.styles import Alignment, PatternFill  # type: ignore
-from openpyxl.utils import get_column_letter  # type: ignore
-from openpyxl.utils.exceptions import InvalidFileException  # type: ignore
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.exceptions import InvalidFileException
 
 from src.configs.path import DEVLOG_DIR, RESULT_DIR
 
@@ -22,8 +23,27 @@ RESULT_HEADERS = [
     "post_status",
     "published_at",
     "post_url",
+    "post_attempt_count",
+    "post_retryable",
     "error",
+    "page_status",
+    "page_attempt_count",
+    "page_ready_at",
+    "page_error",
+    "page_link",
+    "page_retryable",
 ]
+
+POST_RESULT_HEADERS = ("post_attempt_count", "post_retryable")
+
+PAGE_RESULT_HEADERS = (
+    "page_status",
+    "page_attempt_count",
+    "page_ready_at",
+    "page_error",
+    "page_link",
+    "page_retryable",
+)
 
 DEVLOG_HEADERS = [
     "timestamp",
@@ -48,6 +68,7 @@ try:
 except ImportError:
     # Fallback palette matching the application's theme tokens.
     COLORS = {
+        "neutral": {"black": "#000000"},
         "slate": {
             50: "#F8FAFC",
             200: "#E2E8F0",
@@ -65,10 +86,6 @@ _HEADER_FILL = PatternFill(
     "solid",
     fgColor=COLORS["blue"][300].lstrip("#"),
 )
-_HEADER_COLOR = COLORS.get("neutral", {}).get("black") or COLORS.get("slate", {}).get(
-    900, "#0F172A"
-)
-
 _STATUS_COLORS = {
     "Published": (COLORS["emerald"][50], COLORS["green"][600]),
     "Done": (COLORS["emerald"][50], COLORS["green"][600]),
@@ -80,6 +97,17 @@ _STATUS_COLORS = {
     "Started": (COLORS["blue"][50], COLORS["blue"][600]),
     "Skipped": (COLORS["slate"][200], COLORS["slate"][800]),
     "Stopped": (COLORS["slate"][200], COLORS["slate"][800]),
+    "SUCCESS": (COLORS["emerald"][50], COLORS["green"][600]),
+    "FAILED": (COLORS["red"][100], COLORS["red"][600]),
+    "RUNNING": (COLORS["blue"][50], COLORS["blue"][600]),
+    "PENDING": (COLORS["slate"][200], COLORS["slate"][800]),
+    "INTERRUPTED": (COLORS["amber"][50], COLORS["amber"][600]),
+    "Success": (COLORS["emerald"][50], COLORS["green"][600]),
+    "Verified": (COLORS["emerald"][50], COLORS["green"][600]),
+    "Sending": (COLORS["blue"][50], COLORS["blue"][600]),
+    "Preparing": (COLORS["blue"][50], COLORS["blue"][600]),
+    "Retrying": (COLORS["amber"][50], COLORS["amber"][600]),
+    "Interrupted": (COLORS["amber"][50], COLORS["amber"][600]),
 }
 
 _RESULT_WIDTHS = {
@@ -89,12 +117,19 @@ _RESULT_WIDTHS = {
     "page_name": 28,
     "caption": 65,
     "media": 52,
-    "image": 52,
     "comment": 48,
     "post_status": 17,
     "published_at": 23,
     "post_url": 52,
+    "post_attempt_count": 20,
+    "post_retryable": 18,
     "error": 55,
+    "page_status": 16,
+    "page_attempt_count": 18,
+    "page_ready_at": 23,
+    "page_error": 55,
+    "page_link": 52,
+    "page_retryable": 15,
 }
 
 _DEVLOG_WIDTHS = {
@@ -115,7 +150,7 @@ _DEVLOG_WIDTHS = {
 
 
 def _font_with(cell, *, bold=None, color=None):
-    """Preserve the current font family and size while changing emphasis/color."""
+    """Keep the legacy report font while adjusting status emphasis."""
     font = copy(cell.font)
     if bold is not None:
         font.bold = bold
@@ -124,99 +159,105 @@ def _font_with(cell, *, bold=None, color=None):
     cell.font = font
 
 
-def _style_sheet(sheet, widths=None, status_column=None):
-    """Apply the legacy report style without changing worksheet values."""
-    widths = widths or {}
+def _style_data_row(
+    sheet,
+    row_index: int,
+    status_header: str | tuple[str, ...],
+) -> None:
+    """Apply the previous report's plain rows and centered status values."""
+    headers = {str(cell.value): cell.column for cell in sheet[1] if cell.value}
+    status_headers = (
+        {status_header}
+        if isinstance(status_header, str)
+        else set(status_header)
+    )
+    centered_headers = {
+        "post_order", "attempt", "retryable", "published_at",
+        "timestamp", "post_status", "status", "page_status",
+        "post_attempt_count", "post_retryable", "page_attempt_count",
+        "page_retryable", "page_ready_at",
+    }
+
+    sheet.row_dimensions[row_index].height = 15.75
+    for cell in sheet[row_index]:
+        header = str(sheet.cell(1, cell.column).value or "")
+        # Match the old workbook: plain rows, no alternating fills or borders.
+        cell.fill = PatternFill(fill_type=None)
+        cell.border = Border()
+        cell.font = Font(name="Calibri", size=11, color="000000")
+        cell.alignment = Alignment(
+            vertical="center",
+            horizontal="center" if header in centered_headers else "left",
+            wrap_text=True,
+        )
+        if header in {"timestamp", "published_at", "page_ready_at"}:
+            cell.number_format = "dd/mm/yyyy hh:mm:ss"
+
+        # Keep the newer report's clickable post link without changing the
+        # legacy font, fill, and alignment.
+        if header == "post_url":
+            url = str(cell.value or "").strip()
+            if url.startswith(("https://", "http://")):
+                cell.hyperlink = url
+            elif cell.hyperlink is not None:
+                cell.hyperlink = None
+
+    for header in status_headers:
+        index = headers.get(header)
+        if not index:
+            continue
+        cell = sheet.cell(row_index, index)
+        colors = _STATUS_COLORS.get(str(cell.value or ""))
+        if colors:
+            _font_with(cell, bold=True, color=colors[1])
+            cell.alignment = Alignment(
+                vertical="center", horizontal="center", wrap_text=True
+            )
+
+
+def _style_worksheet(sheet, widths: dict, status_header: str | tuple[str, ...]) -> None:
+    """Reproduce the old Results/DevLog presentation, not RUN_STATE."""
+    if sheet.max_column < 1:
+        return
+
     sheet.sheet_view.showGridLines = True
     sheet.freeze_panes = "A2"
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.sheet_view.zoomScale = 90
     sheet.row_dimensions[1].height = 15.75
 
-    for dimension in sheet.column_dimensions.values():
-        if dimension.index == "K":
-            dimension.hidden = False
-
     for cell in sheet[1]:
         cell.fill = _HEADER_FILL
-        _font_with(cell, bold=True, color=_HEADER_COLOR)
+        cell.font = Font(name="Calibri", size=11, bold=True, color="000000")
+        cell.border = Border()
         cell.alignment = Alignment(
-            vertical="center",
-            horizontal="center",
-            wrap_text=True,
+            vertical="center", horizontal="center", wrap_text=True
         )
 
-    header_positions = {str(cell.value): cell.column for cell in sheet[1] if cell.value}
-
-    for index, cell in enumerate(sheet[1], start=1):
-        if cell.value is None:
-            continue
-        header = str(cell.value)
+    for column_index in range(1, sheet.max_column + 1):
+        header = str(sheet.cell(1, column_index).value or "")
         width_key = "media" if header == "image" else header
-        letter = get_column_letter(index)
-        sheet.column_dimensions[letter].width = widths.get(width_key, 18)
+        sheet.column_dimensions[get_column_letter(column_index)].width = widths.get(
+            width_key, 18
+        )
+        if header == "error" or column_index == 11:
+            sheet.column_dimensions[get_column_letter(column_index)].hidden = False
 
+    # The original report used no AutoFilter and showed grid lines.
     sheet.auto_filter.ref = None
     sheet.auto_filter.filterColumn = []
-    status_index = header_positions.get(status_column) if status_column else None
-    date_indices = {
-        header_positions[name]
-        for name in ("timestamp", "published_at")
-        if name in header_positions
-    }
 
-    for row in sheet.iter_rows(min_row=2):
-        sheet.row_dimensions[row[0].row].height = 15.75
-
-        for cell in row:
-            cell.alignment = Alignment(
-                vertical="center",
-                horizontal="left",
-                wrap_text=True,
-            )
-            cell.fill = PatternFill(fill_type=None)
-
-            header = str(sheet.cell(1, cell.column).value or "")
-            if header in {
-                "post_order",
-                "attempt",
-                "retryable",
-                "published_at",
-                "timestamp",
-                "post_status",
-                "status",
-            }:
-                cell.alignment = Alignment(
-                    vertical="center",
-                    horizontal="center",
-                    wrap_text=True,
-                )
-
-            if cell.column in date_indices and isinstance(cell.value, datetime):
-                cell.number_format = "dd/mm/yyyy hh:mm:ss"
-
-        if status_index:
-            status_cell = sheet.cell(row[0].row, status_index)
-            colors = _STATUS_COLORS.get(str(status_cell.value or "").strip())
-            if colors:
-                _font_with(status_cell, bold=True, color=colors[1])
-                status_cell.alignment = Alignment(
-                    vertical="center",
-                    horizontal="center",
-                    wrap_text=True,
-                )
+    for row_index in range(2, sheet.max_row + 1):
+        _style_data_row(sheet, row_index, status_header)
 
 
 def _format_workbook(
-    path: Path,
-    sheet_name: str,
-    widths: dict,
-    status_header: str | None = None,
+    path: Path, sheet_name: str, widths: dict, status_header: str | tuple[str, ...]
 ) -> None:
     workbook = load_workbook(path)
     try:
         if sheet_name in workbook.sheetnames:
-            _style_sheet(workbook[sheet_name], widths, status_header)
+            _style_worksheet(workbook[sheet_name], widths, status_header)
             workbook.save(path)
     finally:
         workbook.close()
@@ -267,8 +308,21 @@ def _backup_invalid_file(path: Path) -> Path:
     return backup_path
 
 
+def _set_excel_value(sheet, row_index: int, column_index: int, value) -> None:
+    """Write user-controlled data as text instead of Excel formulas."""
+    cell = sheet.cell(row_index, column_index, value)
+    if isinstance(value, str) and value.startswith("="):
+        cell.data_type = "s"
+
+
 def _now():
     return datetime.now().astimezone().replace(tzinfo=None)
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
 
 
 class PageAutoReport:
@@ -277,25 +331,21 @@ class PageAutoReport:
         self.result_path = Path(RESULT_DIR) / "PageAuto_Result.xlsx"
 
         self._ensure_result_file()
+        self._ensure_result_columns()
         self._ensure_devlog_file()
 
-        # Apply the legacy formatting to existing and newly-created workbooks.
+        # Apply formatting to both existing and newly-created workbooks.
         _format_workbook(
             self.result_path,
             "Results",
             _RESULT_WIDTHS,
-            "post_status",
+            ("post_status", "page_status"),
         )
         _format_workbook(
             self.devlog_path,
             "DevLog",
             _DEVLOG_WIDTHS,
             "status",
-        )
-        _format_workbook(
-            self.devlog_path,
-            "RUN_STATE",
-            {"key": 32, "value": 42},
         )
 
         self.results = self._read_results()
@@ -326,6 +376,31 @@ class PageAutoReport:
             sheet.title = "Results"
             sheet.append(RESULT_HEADERS)
             workbook.save(self.result_path)
+        finally:
+            workbook.close()
+
+    def _ensure_result_columns(self) -> None:
+        """Add Page-switch columns without changing existing posting history."""
+        workbook = load_workbook(self.result_path)
+
+        try:
+            sheet = workbook["Results"]
+            headers = [cell.value for cell in sheet[1]]
+            next_column = max(
+                (index for index, header in enumerate(headers, start=1) if header),
+                default=0,
+            ) + 1
+            changed = False
+
+            for header in (*PAGE_RESULT_HEADERS, *POST_RESULT_HEADERS):
+                if header not in headers:
+                    sheet.cell(1, next_column, header)
+                    headers.append(header)
+                    next_column += 1
+                    changed = True
+
+            if changed:
+                workbook.save(self.result_path)
         finally:
             workbook.close()
 
@@ -393,23 +468,24 @@ class PageAutoReport:
                 if not task_id:
                     continue
 
+                def value(header: str, default=None):
+                    index = positions.get(header)
+                    return values[index] if index is not None else default
+
                 results[str(task_id)] = {
-                    "post_status": (
-                        values[positions["post_status"]]
-                        if "post_status" in positions
-                        else ""
-                    ),
-                    "published_at": (
-                        values[positions["published_at"]]
-                        if "published_at" in positions
-                        else None
-                    ),
-                    "post_url": (
-                        values[positions["post_url"]] if "post_url" in positions else ""
-                    ),
-                    "error": (
-                        values[positions["error"]] if "error" in positions else ""
-                    ),
+                    "post_status": value("post_status", ""),
+                    "published_at": value("published_at"),
+                    "post_url": value("post_url", ""),
+                    "post_attempt_count": value("post_attempt_count", 0) or 0,
+                    "post_retryable": _as_bool(value("post_retryable", False)),
+                    "error": value("error", ""),
+                    "page_name": value("page_name", ""),
+                    "page_link": value("page_link", ""),
+                    "page_status": value("page_status", ""),
+                    "page_attempt_count": value("page_attempt_count", 0) or 0,
+                    "page_ready_at": value("page_ready_at"),
+                    "page_error": value("page_error", ""),
+                    "page_retryable": _as_bool(value("page_retryable", False)),
                 }
 
             return results
@@ -426,6 +502,8 @@ class PageAutoReport:
         published_at=None,
         post_url="",
         error="",
+        attempt: int | None = None,
+        retryable: bool = False,
     ) -> None:
         task_id = str(row.get("task_id") or "")
         if not task_id:
@@ -462,9 +540,12 @@ class PageAutoReport:
                 "via_name": row.get("via_name", ""),
                 "page_name": row.get("page", row.get("page_name", "")),
                 "caption": row.get("caption", ""),
-                "image": row.get("image", ""),
+                "image": row.get("image", row.get("media", "")),
+                "media": row.get("media", row.get("image", "")),
                 "comment": comment,
                 "post_status": status,
+                "post_attempt_count": int(attempt or 0),
+                "post_retryable": bool(retryable),
                 "published_at": published_at,
                 "post_url": post_url or "",
                 "error": error or "",
@@ -472,17 +553,132 @@ class PageAutoReport:
 
             for column, header in enumerate(headers, start=1):
                 if header in values:
-                    sheet.cell(target_row, column, values[header])
+                    _set_excel_value(sheet, target_row, column, values[header])
 
-            _style_sheet(sheet, _RESULT_WIDTHS, "post_status")
+            _style_data_row(sheet, target_row, "post_status")
+
             workbook.save(self.result_path)
 
-            self.results[task_id] = {
-                "post_status": status,
-                "published_at": published_at,
-                "post_url": post_url or "",
-                "error": error or "",
+            result = self.results.setdefault(task_id, {})
+            result.update(
+                {
+                    "post_status": status,
+                    "post_attempt_count": int(attempt or 0),
+                    "post_retryable": bool(retryable),
+                    "published_at": published_at,
+                    "post_url": post_url or "",
+                    "error": error or "",
+                }
+            )
+        finally:
+            workbook.close()
+
+    def upsert_page_result(
+        self,
+        row: dict,
+        status: str,
+        attempt: int = 0,
+        error: str = "",
+        retryable: bool = False,
+        ready_at=None,
+    ) -> None:
+        """Save Page-switch progress without touching post_status or post history."""
+        task_id = str(row.get("task_id") or "").strip()
+        if not task_id:
+            raise ValueError("Cannot save a Page result without task_id.")
+
+        page_name = str(row.get("page_name") or row.get("page") or "").strip()
+        page_link = str(row.get("page_link") or "").strip()
+        media = str(row.get("media") or row.get("image") or "").strip()
+        comment = str(row.get("comment") or "").strip() or "No comment (skipped)"
+        status = str(status or "").strip().upper()
+
+        if status not in {
+            "PENDING",
+            "RUNNING",
+            "SUCCESS",
+            "FAILED",
+            "INTERRUPTED",
+        }:
+            raise ValueError(f"Invalid Page status: {status}")
+
+        if status == "SUCCESS" and ready_at is None:
+            ready_at = _now()
+        elif status != "SUCCESS":
+            ready_at = None
+
+        workbook = load_workbook(self.result_path)
+
+        try:
+            sheet = workbook["Results"]
+            headers = [cell.value for cell in sheet[1]]
+            positions = {header: index + 1 for index, header in enumerate(headers)}
+
+            if "_task_id" not in positions:
+                raise ValueError("PageAuto_Result.xlsx is missing the _task_id column.")
+
+            target_row = None
+            task_column = positions["_task_id"]
+
+            for row_index in range(2, sheet.max_row + 1):
+                if str(sheet.cell(row_index, task_column).value or "") == task_id:
+                    target_row = row_index
+                    break
+
+            if target_row is None:
+                target_row = sheet.max_row + 1
+
+            values = {
+                "_task_id": task_id,
+                "post_order": row.get("post_order"),
+                "via_name": row.get("via_name", ""),
+                "page_name": page_name,
+                "caption": row.get("caption", ""),
+                "image": media,
+                "media": media,
+                "comment": comment,
+                "page_link": page_link,
+                "page_status": status,
+                "page_attempt_count": max(
+                    0,
+                    int(attempt or 0),
+                ),
+                "page_ready_at": ready_at,
+                "page_error": str(error or ""),
+                "page_retryable": bool(retryable),
             }
+
+            for header, value in values.items():
+                column = positions.get(header)
+                if column is not None:
+                    _set_excel_value(sheet, target_row, column, value)
+
+            _style_data_row(sheet, target_row, ("post_status", "page_status"))
+            workbook.save(self.result_path)
+
+            result = self.results.setdefault(
+                task_id,
+                {
+                    "post_status": "",
+                    "published_at": None,
+                    "post_url": "",
+                    "error": "",
+                },
+            )
+            result.update(
+                {
+                    "page_name": page_name,
+                    "page_link": page_link,
+                    "page_status": status,
+                    "page_attempt_count": max(
+                        0,
+                        int(attempt or 0),
+                    ),
+                    "page_ready_at": ready_at,
+                    "page_error": str(error or ""),
+                    "page_retryable": bool(retryable),
+                }
+            )
         finally:
             workbook.close()
 
@@ -530,7 +726,10 @@ class PageAutoReport:
         try:
             sheet = workbook["DevLog"]
             sheet.append(values)
-            _style_sheet(sheet, _DEVLOG_WIDTHS, "status")
+            for column_index, value in enumerate(values, start=1):
+                if isinstance(value, str) and value.startswith("="):
+                    sheet.cell(sheet.max_row, column_index).data_type = "s"
+            _style_data_row(sheet, sheet.max_row, "status")
             workbook.save(self.devlog_path)
         finally:
             workbook.close()
@@ -608,7 +807,6 @@ class PageAutoReport:
                 sheet.cell(row_index, 1, key)
                 sheet.cell(row_index, 2, value)
 
-            _style_sheet(sheet, {"key": 32, "value": 42})
             workbook.save(self.devlog_path)
         finally:
             workbook.close()

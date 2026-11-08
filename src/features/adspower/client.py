@@ -1,6 +1,7 @@
 import json
 from json import JSONDecodeError
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from src.configs.adspower import ADSPOWER_TIMEOUT
@@ -30,7 +31,25 @@ class AdsPowerClient:
         if not local_api.startswith(("http://", "https://")):
             local_api = f"http://{local_api}"
 
-        return local_api.rstrip("/")
+        local_api = local_api.rstrip("/")
+        try:
+            parts = urlsplit(local_api)
+            port = parts.port  # Validate malformed ports before making a request.
+        except ValueError as error:
+            raise AdsPowerError("Invalid AdsPower Local API URL.") from error
+
+        if (
+            parts.scheme not in {"http", "https"}
+            or not parts.hostname
+            or parts.username is not None
+            or parts.password is not None
+            or parts.path not in {"", "/"}
+            or parts.query
+            or parts.fragment
+        ):
+            raise AdsPowerError("Invalid AdsPower Local API URL.")
+
+        return local_api
 
     # ----- Connection -----
     def check_connection(self) -> bool:
@@ -60,7 +79,10 @@ class AdsPowerClient:
             },
         )
 
-        return result.get("data", {}).get("list", [])
+        data = result.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("list"), list):
+            raise AdsPowerError("AdsPower returned an invalid profile list.")
+        return data["list"]
 
     # ----- Request -----
     def request(
@@ -124,8 +146,13 @@ class AdsPowerClient:
         except JSONDecodeError as error:
             raise AdsPowerError("AdsPower returned invalid response.") from error
 
-        if result.get("code") != 0:
-            raise AdsPowerError(result.get("msg") or "AdsPower request failed.")
+        if not isinstance(result, dict):
+            raise AdsPowerError("AdsPower returned an unexpected response format.")
+
+        if result.get("code") not in (0, "0"):
+            raise AdsPowerError(
+                str(result.get("msg") or result.get("message") or "AdsPower request failed.")
+            )
 
         return result
 
@@ -135,11 +162,14 @@ class AdsPowerClient:
             content = error.read().decode("utf-8")
             result = json.loads(content)
 
+            if not isinstance(result, dict):
+                return f"AdsPower HTTP {error.code}"
+
             return (
                 result.get("msg")
                 or result.get("message")
                 or f"AdsPower HTTP {error.code}"
             )
 
-        except (JSONDecodeError, UnicodeDecodeError):
+        except (JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
             return f"AdsPower HTTP {error.code}"

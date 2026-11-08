@@ -20,6 +20,7 @@ from src.components.notification import NotificationManager
 from src.components.page_header import PageHeader
 from src.components.toggle_switch import ToggleSwitch
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
+from src.configs.path import DATA_FILE, RESULT_DIR
 from src.features.adspower.worker import AdsPowerCheckWorker
 from src.features.page_posting.adspower import clear_credentials, set_credentials
 from src.styles.setting_style import SETTING_STYLE
@@ -285,15 +286,23 @@ class SettingPage(QWidget):
         workbook_label.setObjectName("settingLabel")
 
         self.workbook_input = FilePathInput(
-            text="data/databook.xlsx",
+            text=str(DATA_FILE),
+        )
+        self.workbook_input.browse_button.setEnabled(False)
+        self.workbook_input.browse_button.setToolTip(
+            "Default workbook location is fixed in src/configs/path.py"
         )
 
         # ----- Export Folder -----
-        export_label = QLabel("Export Folder")
+        export_label = QLabel("Results folder")
         export_label.setObjectName("settingLabel")
 
         self.export_folder_input = FilePathInput(
-            text="Download/",
+            text=str(RESULT_DIR),
+        )
+        self.export_folder_input.browse_button.setEnabled(False)
+        self.export_folder_input.browse_button.setToolTip(
+            "Reports are saved in data/results; see src/configs/path.py"
         )
 
         # ----- Storage Form -----
@@ -466,11 +475,11 @@ class SettingPage(QWidget):
             )
             return
 
-        if action in ("connect", "auto") and not api_key:
+        if not api_key:
             if action != "auto":
                 self.notifications.warning(
                     "AdsPower",
-                    "Please enter your API key before connecting.",
+                    "Please enter your API key before testing or connecting.",
                     5000,
                 )
             return
@@ -580,8 +589,8 @@ class SettingPage(QWidget):
         )
 
         set_credentials(
-            self.connected_local_api,
             self.connected_api_key,
+            api_url=self.connected_local_api,
         )
 
         self._set_app_connection_state(True)
@@ -691,7 +700,7 @@ class SettingPage(QWidget):
 
         self.api_key_input.setEnabled(not is_running)
 
-        self.test_button.set_disabled(is_running)
+        self.test_button.set_disabled(is_running or not has_api_key)
 
         self.connect_button.set_disabled(is_running or not has_api_key)
 
