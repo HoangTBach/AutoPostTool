@@ -17,7 +17,6 @@ STATUS_DONE = COLORS["emerald"][500]
 STATUS_ERROR = COLORS["red"][500]
 STATUS_RUNNING = COLORS["blue"][600]
 STATUS_QUEUED = COLORS["slate"][400]
-SCROLLBAR_COLOR = COLORS["slate"][300]
 
 # ----- Border -----
 BORDER_WIDTH = BORDERS["width"]["default"]
@@ -129,28 +128,5 @@ QLabel#tableStatus[status="running"] {{
 
 QLabel#tableStatus[status="queued"] {{
     color: {STATUS_QUEUED};
-}}
-
-QScrollBar:vertical {{
-    background-color: {TRANSPARENT};
-    width: {SPACING[4]}px;
-    margin: 0px;
-}}
-
-QScrollBar::handle:vertical {{
-    background-color: {SCROLLBAR_COLOR};
-    border-radius: {RADIUS["small"]}px;
-    min-height: {SPACING[32]}px;
-}}
-
-QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical {{
-    width: 0px;
-    height: 0px;
-}}
-
-QScrollBar::add-page:vertical,
-QScrollBar::sub-page:vertical {{
-    background-color: {TRANSPARENT};
 }}
 """

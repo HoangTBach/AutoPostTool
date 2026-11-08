@@ -55,7 +55,57 @@ PAGE_TABLE_COLUMNS = [
 
 
 # ----- Group Auto -----
-GROUP_TABLE_COLUMNS = []
+GROUP_TABLE_COLUMNS = [
+    {
+        "key": "no",
+        "title": "No",
+        "width": 50,
+        "resize": "fixed",
+        "align": Qt.AlignmentFlag.AlignLeft,
+    },
+    {
+        "key": "group",
+        "title": "Group",
+        "width": 190,
+        "resize": "fixed",
+        "align": Qt.AlignmentFlag.AlignLeft,
+    },
+    {
+        "key": "caption",
+        "title": "Caption",
+        "resize": "stretch",
+        "stretch": 2,
+        "align": Qt.AlignmentFlag.AlignLeft,
+        "type": "input",
+        "mode": "locked",
+    },
+    {
+        "key": "image",
+        "title": "Image",
+        "resize": "stretch",
+        "stretch": 2,
+        "align": Qt.AlignmentFlag.AlignLeft,
+        "type": "input",
+        "mode": "locked",
+    },
+    {
+        "key": "comment",
+        "title": "Comment",
+        "resize": "stretch",
+        "stretch": 2,
+        "align": Qt.AlignmentFlag.AlignLeft,
+        "type": "input",
+        "mode": "read_only_copy",
+    },
+    {
+        "key": "status",
+        "title": "Status",
+        "width": 90,
+        "resize": "fixed",
+        "align": Qt.AlignmentFlag.AlignRight,
+        "type": "status",
+    },
+]
 
 
 # ----- News Auto -----

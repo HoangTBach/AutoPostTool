@@ -9,7 +9,6 @@ from PySide6.QtCore import (
     QTimer,
     Qt,
     Signal,
-    QRect,
 )
 from PySide6.QtGui import QIcon, QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (

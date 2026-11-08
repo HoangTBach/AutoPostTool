@@ -1,3 +1,7 @@
 # ----- Page Auto -----
 PAGE_AUTO_POST_DELAY = 1  # minutes between posts
 PAGE_AUTO_ORDER_DELAY = 150  # minutes between post_order groups
+
+# ----- Group Auto -----
+GROUP_AUTO_POST_DELAY = 1  # minutes between posts
+GROUP_AUTO_ORDER_DELAY = 120  # minutes between post_order groups

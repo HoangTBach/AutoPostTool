@@ -7,7 +7,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.keys import Keys
-from src.utils.cmd_log import cmd_log
+from selenium.webdriver.common.action_chains import ActionChains
 
 # ----- Facebook Settings -----
 FACEBOOK_HOME_URL = "https://www.facebook.com/"
@@ -1849,12 +1849,16 @@ def _inspect_post_composer_action(driver, allow_global_post: bool = False) -> di
             f"Cannot inspect Facebook composer buttons: {error}",
             retryable=True,
         ) from error
-    return state if isinstance(state, dict) else {
-        "state": "missing",
-        "button": None,
-        "signature": "",
-        "debug": "DOM inspection returned no result",
-    }
+    return (
+        state
+        if isinstance(state, dict)
+        else {
+            "state": "missing",
+            "button": None,
+            "signature": "",
+            "debug": "DOM inspection returned no result",
+        }
+    )
 
 
 # ----- Dismiss Optional Facebook Call Now Prompt -----
@@ -2008,7 +2012,9 @@ def dismiss_call_now_popup(
             try:
                 state = WebDriverWait(
                     driver, appearance_timeout, poll_frequency=0.25
-                ).until(lambda _: (lambda s: s if s.get("visible") else False)(inspect()))
+                ).until(
+                    lambda _: (lambda s: s if s.get("visible") else False)(inspect())
+                )
             except TimeoutException:
                 return False
         else:
@@ -2086,9 +2092,7 @@ def advance_post_composer(
             continue
 
         # Global lookup is enabled only after a successful Next click.
-        state = _inspect_post_composer_action(
-            driver, allow_global_post=next_count > 0
-        )
+        state = _inspect_post_composer_action(driver, allow_global_post=next_count > 0)
         last_state = state
         kind = state.get("state")
 
@@ -2171,17 +2175,15 @@ def submit_facebook_post(
     def locate(browser):
         nonlocal last_state
         dismiss_call_now_popup(browser)
-        last_state = _inspect_post_composer_action(
-            browser, allow_global_post=True
-        )
+        last_state = _inspect_post_composer_action(browser, allow_global_post=True)
         if last_state.get("state") == "ready":
             return last_state.get("button") or False
         return False
 
     try:
-        publish_button = WebDriverWait(
-            driver, timeout, poll_frequency=0.5
-        ).until(locate)
+        publish_button = WebDriverWait(driver, timeout, poll_frequency=0.5).until(
+            locate
+        )
     except TimeoutException as error:
         raise FacebookPostError(
             "No safe Publish button was found. "
@@ -2203,9 +2205,7 @@ def submit_facebook_post(
 
     # ----- Recheck the Optional Popup Before Publishing -----
     if dismiss_call_now_popup(driver):
-        refreshed = _inspect_post_composer_action(
-            driver, allow_global_post=True
-        )
+        refreshed = _inspect_post_composer_action(driver, allow_global_post=True)
         if refreshed.get("state") != "ready" or refreshed.get("button") is None:
             raise FacebookPostError(
                 "Publish button was not ready after closing the Call Now popup.",
@@ -2227,9 +2227,7 @@ def submit_facebook_post(
     # The old project handled this popup after the Post click. Never click
     # Publish again, even if dismissing the optional popup fails.
     try:
-        dismiss_call_now_popup(
-            driver, timeout=7, appearance_timeout=5
-        )
+        dismiss_call_now_popup(driver, timeout=7, appearance_timeout=5)
     except Exception as error:
         raise PublishUnknownError(
             "Publish was clicked, but the Call Now popup could not be "
@@ -2332,6 +2330,7 @@ def run_facebook_post(
         on_before_submit=on_before_submit,
     )
 
+
 # ----- Normalize Facebook Post URL -----
 def _normalize_facebook_post_url(value: str) -> str:
     from urllib.parse import parse_qs
@@ -2348,7 +2347,9 @@ def _normalize_facebook_post_url(value: str) -> str:
     if host != "facebook.com" and not host.endswith(".facebook.com"):
         return ""
     path = parsed.path.rstrip("/")
-    if re.fullmatch(r"/(?:[^/]+/)?(?:posts|videos|reel|permalink)/[A-Za-z0-9_-]+", path, re.I):
+    if re.fullmatch(
+        r"/(?:[^/]+/)?(?:posts|videos|reel|permalink)/[A-Za-z0-9_-]+", path, re.I
+    ):
         return "https://www.facebook.com" + path
     if path.lower() in {"/story.php", "/permalink.php"}:
         params = parse_qs(parsed.query)
@@ -2356,7 +2357,8 @@ def _normalize_facebook_post_url(value: str) -> str:
         page_id = (params.get("id") or [""])[0]
         if re.fullmatch(r"[A-Za-z0-9_-]+", story_id):
             return (
-                "https://www.facebook.com/story.php?story_fbid=" + story_id
+                "https://www.facebook.com/story.php?story_fbid="
+                + story_id
                 + ("&id=" + page_id if page_id.isdigit() else "")
             )
     return ""
@@ -2633,7 +2635,9 @@ def capture_published_post_url(
                 check_stop()
                 if time.monotonic() >= deadline:
                     break
-                result = driver.execute_script(inspect_script, caption, published_after or 0)
+                result = driver.execute_script(
+                    inspect_script, caption, published_after or 0
+                )
                 if not isinstance(result, dict):
                     result = {"state": "missing", "reason": "DOM returned no result"}
                 state = str(result.get("state") or "missing")
@@ -2649,14 +2653,17 @@ def capture_published_post_url(
                     before_url = driver.current_url
                     previous_handles = set(driver.window_handles)
                     try:
-                        from selenium.webdriver.common.action_chains import ActionChains
+
                         driver.execute_script(
                             "arguments[0].scrollIntoView({block:'center'});", button
                         )
                         ActionChains(driver).move_to_element(button).perform()
-                        href = _normalize_facebook_post_url(
-                            button.get_attribute("href") or ""
-                        ) or href
+                        href = (
+                            _normalize_facebook_post_url(
+                                button.get_attribute("href") or ""
+                            )
+                            or href
+                        )
                         button.click()
                     except WebDriverException as error:
                         last_reason = f"could not click timestamp: {error}"
@@ -2699,6 +2706,7 @@ def capture_published_post_url(
         f"Last reason: {last_reason}; {last_details}. Do not publish again."
     )
 
+
 # ----- Open a Verified Published Post URL -----
 def open_published_post_url(driver, post_url: str, timeout: int = 30) -> str:
     """Open the captured permalink and verify the browser is on that post."""
@@ -2722,13 +2730,12 @@ def open_published_post_url(driver, post_url: str, timeout: int = 30) -> str:
         def post_page_ready(browser):
             if _normalize_facebook_post_url(browser.current_url) != expected:
                 return False
-            return browser.execute_script(
-                "return document.readyState"
-            ) in {"interactive", "complete"}
+            return browser.execute_script("return document.readyState") in {
+                "interactive",
+                "complete",
+            }
 
-        WebDriverWait(
-            driver, timeout, poll_frequency=0.5
-        ).until(post_page_ready)
+        WebDriverWait(driver, timeout, poll_frequency=0.5).until(post_page_ready)
 
     except TimeoutException as error:
         raise FacebookPostError(
@@ -2745,7 +2752,6 @@ def open_published_post_url(driver, post_url: str, timeout: int = 30) -> str:
     return expected
 
 
-
 # ----- Inspect a Rendered Published Comment Using DOM -----
 def _published_comment_snapshot(driver, comment: str) -> dict:
     """Count matching displayed comment bodies, not editor drafts.
@@ -2754,7 +2760,8 @@ def _published_comment_snapshot(driver, comment: str) -> dict:
     The fallback searches bounded comment containers instead of requiring
     one child element's innerText to equal the entire Excel comment.
     """
-    result = driver.execute_script(r"""
+    result = driver.execute_script(
+        r"""
         const wanted = String(arguments[0] || '');
         const basic = value => String(value || '').normalize('NFKC')
             .replace(/[\u200B-\u200F\u2060\uFE0E\uFE0F\uFEFF]/g, '')
@@ -2854,15 +2861,17 @@ def _published_comment_snapshot(driver, comment: str) -> dict:
             exact: exact.length,
             bounded: bounded.length
         };
-    """, str(comment or ''))
+    """,
+        str(comment or ""),
+    )
     if not isinstance(result, dict):
-        return {'count': 0, 'exact': 0, 'bounded': 0}
+        return {"count": 0, "exact": 0, "bounded": 0}
     return result
 
 
 def _reveal_reel_comments_for_verification(driver) -> None:
     """Open a collapsed Reel comment panel without sending anything."""
-    if '/reel/' not in (driver.current_url or '').casefold():
+    if "/reel/" not in (driver.current_url or "").casefold():
         return
     control = driver.execute_script(r"""
         const norm = value => String(value || '').normalize('NFD')
@@ -2878,27 +2887,38 @@ def _reveal_reel_comments_for_verification(driver) -> None:
         return buttons.length === 1 ? buttons[0] : null;
     """)
     if control is not None:
-        driver.execute_script('arguments[0].click();', control)
+        driver.execute_script("arguments[0].click();", control)
 
 
 def verify_visible_published_comment(
-    driver, comment: str, *, post_url: str, timeout: int = 25,
+    driver,
+    comment: str,
+    *,
+    post_url: str,
+    timeout: int = 25,
 ) -> bool:
     """Read-only verification of an already attempted Comment send.
 
     This function must never type, click Send, or retry publishing.
     """
     expected_url = _normalize_facebook_post_url(post_url)
-    if driver is None or not expected_url or not str(comment or '').strip():
-        raise FacebookPostError('A valid Post URL and Comment are required.', retryable=False)
+    if driver is None or not expected_url or not str(comment or "").strip():
+        raise FacebookPostError(
+            "A valid Post URL and Comment are required.", retryable=False
+        )
     if _normalize_facebook_post_url(driver.current_url) != expected_url:
-        raise FacebookPostError('Browser is not on the expected Facebook Post.', retryable=False)
-    if int(_published_comment_snapshot(driver, comment).get('count') or 0) > 0:
+        raise FacebookPostError(
+            "Browser is not on the expected Facebook Post.", retryable=False
+        )
+    if int(_published_comment_snapshot(driver, comment).get("count") or 0) > 0:
         return True
     _reveal_reel_comments_for_verification(driver)
     try:
         WebDriverWait(driver, timeout, poll_frequency=0.5).until(
-            lambda browser: int(_published_comment_snapshot(browser, comment).get('count') or 0) > 0
+            lambda browser: int(
+                _published_comment_snapshot(browser, comment).get("count") or 0
+            )
+            > 0
         )
         return True
     except TimeoutException:
@@ -2927,11 +2947,17 @@ def post_comment_on_opened_post(
     if not comment:
         raise FacebookPostError("Comment text is empty.", retryable=False)
     if driver is None or not expected_url:
-        raise FacebookPostError("A verified Post URL is required for commenting.", retryable=False)
+        raise FacebookPostError(
+            "A verified Post URL is required for commenting.", retryable=False
+        )
     if not callable(on_before_send):
-        raise FacebookPostError("Missing durable before-comment callback.", retryable=False)
+        raise FacebookPostError(
+            "Missing durable before-comment callback.", retryable=False
+        )
     if _normalize_facebook_post_url(driver.current_url) != expected_url:
-        raise FacebookPostError("Browser is not on the expected Facebook Post.", retryable=False)
+        raise FacebookPostError(
+            "Browser is not on the expected Facebook Post.", retryable=False
+        )
 
     # ----- Locate the Comment Editor and Send Control by DOM ----
     inspect_script = r"""
@@ -3088,24 +3114,30 @@ def post_comment_on_opened_post(
         ) from error
 
     def read_editor():
-        return driver.execute_script(
-            "return arguments[0].tagName === 'TEXTAREA' ? "
-            "arguments[0].value : arguments[0].innerText;", editor,
-        ) or ""
+        return (
+            driver.execute_script(
+                "return arguments[0].tagName === 'TEXTAREA' ? "
+                "arguments[0].value : arguments[0].innerText;",
+                editor,
+            )
+            or ""
+        )
 
     def normalized(value):
         import unicodedata
 
         cleaned = unicodedata.normalize("NFKC", str(value or ""))
         cleaned = "".join(
-            char for char in cleaned
+            char
+            for char in cleaned
             if char not in "\u200b\u200c\u200d\u2060\ufe0e\ufe0f\ufeff"
         )
         return " ".join(cleaned.split())
 
     # ----- Focus DOM Editor Without a Pointer Click -----
     try:
-        focused = driver.execute_script(r"""
+        focused = driver.execute_script(
+            r"""
             const editor = arguments[0];
             if (!editor || !editor.isConnected) return false;
             const modals = [...document.querySelectorAll('[aria-modal="true"]')]
@@ -3118,7 +3150,9 @@ def post_comment_on_opened_post(
             editor.focus({preventScroll: true});
             return document.activeElement === editor ||
                 editor.contains(document.activeElement);
-        """, editor)
+        """,
+            editor,
+        )
         if not focused:
             raise FacebookPostError(
                 "Facebook comment editor could not receive DOM focus.",
@@ -3142,8 +3176,7 @@ def post_comment_on_opened_post(
                         "Cannot safely type a multiline comment without CDP.",
                         retryable=False,
                     ) from cdp_error
-                # Keyboard actions go to document.activeElement, not an x/y position.
-                from selenium.webdriver.common.action_chains import ActionChains
+
                 ActionChains(driver).send_keys(comment).perform()
 
         WebDriverWait(driver, 15, poll_frequency=0.25).until(
@@ -3153,17 +3186,23 @@ def post_comment_on_opened_post(
         state = inspect("inspect")
         if state.get("ambiguous_send"):
             raise FacebookPostError(
-                "Multiple comment Send buttons are visible.", retryable=False,
+                "Multiple comment Send buttons are visible.",
+                retryable=False,
             )
         if state.get("send_disabled"):
+
             def send_ready(browser):
                 current = inspect("inspect")
                 if current.get("ambiguous_send"):
                     raise FacebookPostError(
-                        "Ambiguous Comment Send buttons.", retryable=False,
+                        "Ambiguous Comment Send buttons.",
+                        retryable=False,
                     )
                 return current.get("send_button") or False
-            send_button = WebDriverWait(driver, 10, poll_frequency=0.25).until(send_ready)
+
+            send_button = WebDriverWait(driver, 10, poll_frequency=0.25).until(
+                send_ready
+            )
         else:
             send_button = state.get("send_button")
     except FacebookPostError:
@@ -3190,7 +3229,8 @@ def post_comment_on_opened_post(
         if live_editor is None:
             return False
 
-        result = driver.execute_script(r"""
+        result = driver.execute_script(
+            r"""
             const editor = arguments[0];
             const expected = arguments[1];
             const normalise = value => String(value || '')
@@ -3212,7 +3252,10 @@ def post_comment_on_opened_post(
                 status: active === editor || editor.contains(active)
                     ? 'ready' : 'focus_lost'
             };
-        """, live_editor, comment)
+        """,
+            live_editor,
+            comment,
+        )
 
         if result.get("status") == "draft_changed":
             raise FacebookPostError(
@@ -3230,7 +3273,8 @@ def post_comment_on_opened_post(
             current = inspect("inspect")
             if current.get("ambiguous_send"):
                 raise FacebookPostError(
-                    "Multiple Comment Send buttons are visible.", retryable=False,
+                    "Multiple Comment Send buttons are visible.",
+                    retryable=False,
                 )
             send_button = current.get("send_button")
             if send_button is None:
@@ -3255,21 +3299,20 @@ def post_comment_on_opened_post(
     on_before_send()
     try:
         if send_button is not None:
-            clicked = driver.execute_script(r"""
+            clicked = driver.execute_script(
+                r"""
                 const button = arguments[0];
                 if (!button || !button.isConnected || button.disabled ||
                     button.getAttribute('aria-disabled') === 'true') return false;
                 button.click();
                 return true;
-            """, send_button)
+            """,
+                send_button,
+            )
             if not clicked:
                 raise RuntimeError("Comment Send control is no longer available.")
         else:
-            # The live editor and its draft were re-checked and focused above,
-            # before the durable Sending marker. The callback only writes the
-            # report, so do not trigger another DOM inspection after it.
-            from selenium.webdriver.common.action_chains import ActionChains
-            ActionChains(driver).send_keys(Keys.ENTER).perform()
+            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ENTER)
     except Exception as error:
         reason = str(error).splitlines()[0]
         raise CommentSubmissionUnknownError(
@@ -3281,7 +3324,8 @@ def post_comment_on_opened_post(
         WebDriverWait(driver, timeout, poll_frequency=0.5).until(
             lambda browser: int(
                 _published_comment_snapshot(browser, comment).get("count") or 0
-            ) > baseline
+            )
+            > baseline
         )
     except Exception as error:
         raise CommentSubmissionUnknownError(

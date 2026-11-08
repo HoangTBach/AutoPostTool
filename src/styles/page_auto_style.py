@@ -66,4 +66,20 @@ QTableWidget#pageTable {{
     border-radius: {RADIUS["icon"]}px;
     outline: none;
 }}
+QWidget#pageEmptyState {{
+    background-color: {TRANSPARENT};
+}}
+
+QLabel#pageEmptyTitle {{
+    color: {TEXT_COLOR};
+    background-color: {TRANSPARENT};
+    font-size: {FONTS["size"][14]}px;
+    font-weight: {FONTS["weight"]["semibold"]};
+}}
+
+QLabel#pageEmptySubtitle {{
+    color: {TEXT_SUMMARY};
+    background-color: {TRANSPARENT};
+    font-size: {FONTS["size"][12]}px;
+}}
 """

@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 from pathlib import Path
 from urllib.parse import urlsplit
-from selenium.common.exceptions import WebDriverException
 
 from PySide6.QtCore import QSettings, QThread, Signal
 
@@ -2179,14 +2178,22 @@ class PageAutoWorker(QThread):
             cmd_log("SUCCESS", f"Facebook Post URL: {opened_url}")
             cmd_log("INFO", "Verifying existing comment...")
             confirmed = verify_visible_published_comment(
-                driver, comment, post_url=opened_url, timeout=25,
+                driver,
+                comment,
+                post_url=opened_url,
+                timeout=25,
             )
         except Exception as error:
             reason = str(error).splitlines()[0][:240]
             message = "Comment verification is still uncertain: " + reason
             report.log_event(
-                row, self.run_id, "post:comment", "Unknown",
-                attempt=0, error=error, retryable=False,
+                row,
+                self.run_id,
+                "post:comment",
+                "Unknown",
+                attempt=0,
+                error=error,
+                retryable=False,
             )
             cmd_log("WARNING", message)
             self._emit_rows(target["rows"], "Done", message)
@@ -2194,21 +2201,34 @@ class PageAutoWorker(QThread):
 
         if not confirmed:
             message = str(saved.get("error") or "Comment still requires verification.")
-            cmd_log("WARNING", "Existing Comment was not found; no new Comment was sent.")
+            cmd_log(
+                "WARNING", "Existing Comment was not found; no new Comment was sent."
+            )
             report.log_event(
-                row, self.run_id, "post:comment", "Unknown",
-                attempt=0, retryable=False,
+                row,
+                self.run_id,
+                "post:comment",
+                "Unknown",
+                attempt=0,
+                retryable=False,
             )
             self._emit_rows(target["rows"], "Done", message)
             return "passed"
 
         report.upsert_result(
-            row, "Published", published_at=saved.get("published_at"),
-            post_url=opened_url, error="",
+            row,
+            "Published",
+            published_at=saved.get("published_at"),
+            post_url=opened_url,
+            error="",
         )
         report.log_event(
-            row, self.run_id, "post:comment", "Verified",
-            attempt=0, retryable=False,
+            row,
+            self.run_id,
+            "post:comment",
+            "Verified",
+            attempt=0,
+            retryable=False,
         )
         cmd_log("SUCCESS", "Existing Comment verified successfully")
         self._emit_rows(target["rows"], "Done")

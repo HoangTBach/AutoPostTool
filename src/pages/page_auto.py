@@ -253,6 +253,7 @@ class PageAutoPage(QWidget):
         self.table = Table(columns=PAGE_TABLE_COLUMNS)
 
         self.table_card.set_table(self.table)
+        self._render_empty_state()
 
         # ----- Content -----
         content = QWidget()
@@ -711,8 +712,37 @@ class PageAutoPage(QWidget):
             self.config_card.setMaximumHeight(0)
 
     # ----- Page Data -----
+    def _render_empty_state(self):
+        """Show the same empty-table treatment used in Group Auto.
+
+        Table.set_data() recreates its body children, so the placeholder must
+        be rebuilt after refreshes that contain zero rows.
+        """
+        empty_state = QWidget(self.table.body)
+        empty_state.setObjectName("pageEmptyState")
+        empty_layout = QVBoxLayout(empty_state)
+        empty_layout.setContentsMargins(16, 40, 16, 40)
+        empty_layout.setSpacing(8)
+
+        title = QLabel("No pages added yet")
+        title.setObjectName("pageEmptyTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel(
+            "Import an Excel file to see your pages and post progress here."
+        )
+        subtitle.setObjectName("pageEmptySubtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+
+        empty_layout.addWidget(title)
+        empty_layout.addWidget(subtitle)
+        self.table.body_layout.addWidget(empty_state)
+
     def refresh_page(self):
         self.table.set_data(self.page_rows)
+        if not self.page_rows:
+            self._render_empty_state()
 
         self.update_summary()
         self.update_stats()
@@ -749,7 +779,9 @@ class PageAutoPage(QWidget):
         self.active_pages_card.value_label.setText(f"{active_pages} / {total_pages}")
 
         self.active_pages_card.description_label.setText(
-            f"{total_pages - active_pages} " "pages need review"
+            "No pages loaded"
+            if total_pages == 0
+            else f"{total_pages - active_pages} pages need review"
         )
 
         self.published_card.value_label.setText(str(published))

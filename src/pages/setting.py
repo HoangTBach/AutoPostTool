@@ -4,6 +4,9 @@ from PySide6.QtCore import QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
+    QFrame,
+    QSizePolicy,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -13,60 +16,37 @@ from PySide6.QtWidgets import (
 )
 
 from src.components.button import Button
-from src.components.card import Card
+from src.components.card import Card, SectionCard
 from src.components.input import Input
 from src.components.file_path_input import FilePathInput
 from src.components.notification import NotificationManager
 from src.components.page_header import PageHeader
+from src.components.setting_choice import (
+    SettingChoiceTile,
+    SettingRadioChoice,
+    SettingWorkspacePreview,
+)
+from src.components.smooth_scroll_area import SmoothScrollArea
 from src.components.toggle_switch import ToggleSwitch
 from src.configs.adspower import ADSPOWER_DEFAULT_URL
 from src.configs.path import DATA_FILE, RESULT_DIR
 from src.features.adspower.worker import AdsPowerCheckWorker
 from src.features.page_posting.adspower import clear_credentials, set_credentials
-from src.styles.setting_style import SETTING_STYLE
+from src.styles.setting_style import (
+    SETTING_NOTIFICATION_ITEM_STYLE,
+    SETTING_PAGE_STYLE,
+    SETTING_SECTIONS_STYLE,
+    SETTING_STYLE,
+    CARD_BORDER,
+    CONNECTION_STATUS_STYLES,
+)
 from src.themes.spacing import SPACING as SPACE
 from src.utils.cmd_log import cmd_log
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 
-SETTING_PAGE_STYLE = """
-QWidget#settingsPage {
-    background-color: transparent;
-    border: none;
-}
-
-QWidget#settingsPathField {
-    background-color: transparent;
-    border: none;
-}
-
-QToolButton#settingsPathBrowseButton {
-    background-color: transparent;
-    border: none;
-    padding: 0;
-}
-
-QLabel#settingFooterTitle {
-    color: #0F172A;
-    background-color: transparent;
-    border: none;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-QLabel#settingFooterSubtitle {
-    color: #94A3B8;
-    background-color: transparent;
-    border: none;
-    font-size: 10px;
-    font-weight: 400;
-}
-"""
-
-
 class SettingPage(QWidget):
-
     # ----- Settings -----
     MARGIN = (SPACE[32], SPACE[32], SPACE[32], SPACE[32])
     SPACING = SPACE["legacy"][20]
@@ -84,6 +64,27 @@ class SettingPage(QWidget):
 
     AUTO_RECONNECT_DEFAULT = False
     AUTO_RECONNECT_INTERVAL = 15000
+
+    # ----- UI Preferences -----
+    UI_DEFAULTS = {
+        "theme": "Light",
+        "language": "English",
+        "task_completed": True,
+        "notification_sound": False,
+        "task_failed": True,
+        "desktop_notifications": False,
+        "start_with_windows": False,
+        "minimize_to_tray": False,
+        "confirm_before_close": False,
+        "sidebar_mode": "Expanded",
+        "split_page": "off",
+    }
+    UI_CHOICE_VALUES = {
+        "theme": ("Light", "Dark", "System"),
+        "language": ("English", "Vietnamese"),
+        "sidebar_mode": ("Expanded", "Compact"),
+        "split_page": ("off", "vertical", "horizontal"),
+    }
 
     # ----- Initialize -----
     def __init__(self):
@@ -114,7 +115,10 @@ class SettingPage(QWidget):
             type=bool,
         )
 
-        self.setStyleSheet(SETTING_STYLE + SETTING_PAGE_STYLE)
+        self._saved_ui_preferences = self._load_ui_preferences()
+        self._ui_choice_buttons = {}
+        self._ui_toggles = {}
+        self.setStyleSheet(SETTING_STYLE + SETTING_PAGE_STYLE + SETTING_SECTIONS_STYLE)
 
         # ----- Connection State -----
         self.is_connected = False
@@ -138,47 +142,34 @@ class SettingPage(QWidget):
         )
 
         # ----- AdsPower Card -----
-        adspower_card = Card()
+        adspower_card = SectionCard(
+            "AdsPower Connection",
+            "Connect your AdsPower workspace and local API",
+            header_border=True,
+            header_height=63,
+            header_margin=(20, 16, 20, 14),
+            body_margin=self.CARD_MARGIN,
+            body_spacing=self.CARD_SPACING,
+            title_object_name="settingCardTitle",
+            description_object_name="settingCardSubtitle",
+        )
+        self._style_section_card(adspower_card)
         adspower_card.setMinimumHeight(240)
-
-        adspower_layout = QVBoxLayout(adspower_card)
-        adspower_layout.setContentsMargins(*self.CARD_MARGIN)
-        adspower_layout.setSpacing(self.CARD_SPACING)
-
-        # ----- AdsPower Header -----
-        adspower_title = QLabel("AdsPower Connection")
-        adspower_title.setObjectName("settingCardTitle")
-
-        adspower_subtitle = QLabel("Connect your AdsPower workspace and local API")
-        adspower_subtitle.setObjectName("settingCardSubtitle")
-
-        title_layout = QVBoxLayout()
-        title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(SPACE[2])
-        title_layout.addWidget(adspower_title)
-        title_layout.addWidget(adspower_subtitle)
+        adspower_layout = adspower_card.body_layout
 
         # ----- Connection Status -----
         self.status_label = QLabel("● Disconnected")
         self.status_label.setObjectName("connectionStatus")
         self.status_label.setProperty("state", "disconnected")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        adspower_header_layout = QHBoxLayout()
-        adspower_header_layout.setContentsMargins(0, 0, 0, 0)
-        adspower_header_layout.addLayout(title_layout)
-        adspower_header_layout.addStretch()
-        adspower_header_layout.addWidget(
-            self.status_label,
-            alignment=Qt.AlignmentFlag.AlignVCenter,
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
-
-        adspower_layout.addLayout(adspower_header_layout)
-
-        # ----- Divider -----
-        adspower_divider = QWidget()
-        adspower_divider.setObjectName("settingDivider")
-        adspower_layout.addWidget(adspower_divider)
+        self.status_label.setMinimumHeight(23)
+        self.status_label.setStyleSheet(CONNECTION_STATUS_STYLES["disconnected"])
+        adspower_card.header_layout.addWidget(
+            self.status_label, 0, Qt.AlignmentFlag.AlignVCenter
+        )
 
         # ----- Local API -----
         api_label = QLabel("Local API")
@@ -256,30 +247,20 @@ class SettingPage(QWidget):
         adspower_layout.addLayout(reconnect_layout)
 
         # ----- Data File & Storage Card -----
-        storage_card = Card()
+        storage_card = SectionCard(
+            "Data File & Storage",
+            "Manage the workbook and export location",
+            header_border=True,
+            header_height=63,
+            header_margin=(20, 16, 20, 14),
+            body_margin=self.CARD_MARGIN,
+            body_spacing=self.CARD_SPACING,
+            title_object_name="settingCardTitle",
+            description_object_name="settingCardSubtitle",
+        )
+        self._style_section_card(storage_card)
         storage_card.setMinimumHeight(240)
-
-        storage_layout = QVBoxLayout(storage_card)
-        storage_layout.setContentsMargins(*self.CARD_MARGIN)
-        storage_layout.setSpacing(self.CARD_SPACING)
-
-        storage_title = QLabel("Data File & Storage")
-        storage_title.setObjectName("settingCardTitle")
-
-        storage_subtitle = QLabel("Manage the workbook and export location")
-        storage_subtitle.setObjectName("settingCardSubtitle")
-
-        storage_title_layout = QVBoxLayout()
-        storage_title_layout.setContentsMargins(0, 0, 0, 0)
-        storage_title_layout.setSpacing(SPACE[2])
-        storage_title_layout.addWidget(storage_title)
-        storage_title_layout.addWidget(storage_subtitle)
-
-        storage_layout.addLayout(storage_title_layout)
-
-        storage_divider = QWidget()
-        storage_divider.setObjectName("settingDivider")
-        storage_layout.addWidget(storage_divider)
+        storage_layout = storage_card.body_layout
 
         # ----- Default Workbook -----
         workbook_label = QLabel("Default workbook")
@@ -316,7 +297,7 @@ class SettingPage(QWidget):
         storage_layout.addLayout(storage_form_layout)
         storage_layout.addStretch()
 
-        # ----- Content -----
+        # ----- AdsPower & Storage Row -----
         content_layout = QHBoxLayout()
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(SPACE[12])
@@ -324,15 +305,38 @@ class SettingPage(QWidget):
         content_layout.addWidget(adspower_card, 1)
         content_layout.addWidget(storage_card, 1)
 
+        # ----- Theme & Language -----
+        theme_card = self._build_theme_language()
+        theme_card.set_disabled(True)
+
+        # ----- Notifications & Application Preferences -----
+        settings_row = QHBoxLayout()
+        settings_row.setContentsMargins(0, 0, 0, 0)
+        settings_row.setSpacing(SPACE[16])
+
+        notifications_card = self._build_notifications()
+        notifications_card.set_disabled(True)
+
+        preferences_card = self._build_application_preferences()
+        preferences_card.set_disabled(True)
+
+        settings_row.addWidget(notifications_card, 6)
+        settings_row.addWidget(preferences_card, 5)
+
+        # ----- Custom Sidebar -----
+        sidebar_card = self._build_custom_sidebar()
+        sidebar_card.set_disabled(True)
+
         # ----- Footer -----
         footer = Card()
-        footer.setMinimumHeight(52)
+        footer.setProperty("settingFooter", True)
+        footer.setFixedHeight(61)
 
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(
-            SPACE[16],
             SPACE[12],
-            SPACE[16],
+            SPACE[12],
+            SPACE[12],
             SPACE[12],
         )
         footer_layout.setSpacing(SPACE[12])
@@ -368,7 +372,9 @@ class SettingPage(QWidget):
             color="blue",
         )
 
-        self.set_default_button.set_disabled(True)
+        self.set_default_button.setToolTip(
+            "Reset the Theme & Language and other UI choices."
+        )
 
         self.save_button = Button(
             text="Save Changes",
@@ -380,15 +386,43 @@ class SettingPage(QWidget):
         footer_layout.addWidget(self.set_default_button)
         footer_layout.addWidget(self.save_button)
 
+        # ----- Scrollable Settings -----
+        # AdsPower Connection through Custom Sidebar scrolls as a single page.
+        # The save footer remains outside the scroll area.
+        scroll_content = QWidget()
+        scroll_content.setObjectName("settingsScrollableContent")
+        scroll_content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(SPACE[16])
+        scroll_layout.addLayout(content_layout)
+        scroll_layout.addWidget(theme_card)
+        scroll_layout.addLayout(settings_row)
+        scroll_layout.addWidget(sidebar_card)
+        scroll_layout.addStretch(1)
+
+        self.settings_scroll = SmoothScrollArea()
+        self.settings_scroll.setObjectName("settingsSmoothScroll")
+        self.settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.settings_scroll.viewport().setStyleSheet(
+            "background: transparent; border: none;"
+        )
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.settings_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.settings_scroll.setWidget(scroll_content)
+
         # ----- Page Layout -----
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*self.MARGIN)
         layout.setSpacing(self.SPACING)
-
         layout.addWidget(header)
-        layout.addLayout(content_layout)
-        layout.addStretch(1)
-        layout.addWidget(footer)
+        layout.addWidget(self.settings_scroll, 1)
+        layout.addWidget(footer, 0)
 
         # ----- Events -----
         self.test_button.clicked.connect(self.test_connection)
@@ -397,9 +431,348 @@ class SettingPage(QWidget):
         self.api_key_input.textChanged.connect(self.handle_credentials_changed)
         self.reconnect_switch.toggled.connect(self.toggle_auto_reconnect)
         self.save_button.clicked.connect(self.save_changes)
+        self.set_default_button.clicked.connect(self.reset_ui_preferences)
 
         self.update_actions()
         self._apply_auto_reconnect_setting(run_immediately=True)
+
+    # ----- UI Preferences -----
+    def _load_ui_preferences(self) -> dict:
+        values = {}
+        for name, default in self.UI_DEFAULTS.items():
+            key = f"settings_ui/{name}"
+            value = self.settings.value(key, default, type=type(default))
+            if (
+                name in self.UI_CHOICE_VALUES
+                and value not in self.UI_CHOICE_VALUES[name]
+            ):
+                value = default
+            values[name] = value
+        return values
+
+    def _current_ui_preferences(self) -> dict:
+        values = {}
+        for name, options in self._ui_choice_buttons.items():
+            values[name] = next(
+                (value for value, button in options.items() if button.isChecked()),
+                self.UI_DEFAULTS[name],
+            )
+        for name, toggle in self._ui_toggles.items():
+            values[name] = toggle.isChecked()
+        return values
+
+    def _track_ui_choice(self, key: str, value: str, button, group: QButtonGroup):
+        group.addButton(button)
+        self._ui_choice_buttons.setdefault(key, {})[value] = button
+        button.setChecked(self._saved_ui_preferences[key] == value)
+        button.toggled.connect(lambda _checked: self.update_actions())
+
+    def _track_ui_toggle(self, key: str, toggle: ToggleSwitch):
+        toggle.setChecked(self._saved_ui_preferences[key])
+        self._ui_toggles[key] = toggle
+        toggle.toggled.connect(lambda _checked: self.update_actions())
+
+    def reset_ui_preferences(self):
+        # This resets the draft UI choices, not AdsPower credentials or OS settings.
+        for key, options in self._ui_choice_buttons.items():
+            options[self.UI_DEFAULTS[key]].setChecked(True)
+        for key, toggle in self._ui_toggles.items():
+            toggle.setChecked(self.UI_DEFAULTS[key])
+        self.update_actions()
+
+    # ----- Settings Section Card -----
+    @staticmethod
+    def _style_section_card(card: SectionCard) -> None:
+        card.setProperty("settingSection", True)
+
+    @staticmethod
+    def _section_card(title: str, subtitle: str, height: int):
+        card = SectionCard(
+            title,
+            subtitle,
+            header_border=True,
+            header_height=63,
+            header_margin=(20, 16, 20, 14),
+            body_margin=(20, 20, 20, 20),
+            header_spacing=2,
+            title_object_name="settingCardTitle",
+            description_object_name="settingCardSubtitle",
+        )
+        card.setProperty("settingSection", True)
+        card.setFixedHeight(height)
+        return card, card.body_layout
+
+    @staticmethod
+    def _field_title(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("settingsFieldTitle")
+        return label
+
+    @staticmethod
+    def _vertical_divider(parent=None) -> QFrame:
+        # Same 1px slate divider used by the Page Auto Config card.
+        divider = QFrame(parent)
+        divider.setObjectName("settingsVerticalDivider")
+        divider.setFrameShape(QFrame.Shape.NoFrame)
+        divider.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        divider.setFixedWidth(1)
+        divider.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        divider.setStyleSheet(f"background-color: {CARD_BORDER}; border: none;")
+        return divider
+
+    # ----- Theme & Language -----
+    def _build_theme_language(self) -> SectionCard:
+        card, body_layout = self._section_card(
+            "Theme & Language",
+            "Customize the appearance and display language of the application.",
+            225,
+        )
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(16)
+        body_layout.addLayout(row, 1)
+
+        theme_column = QWidget(card.body)
+        theme_column.setObjectName("settingsThemeColumn")
+        theme_layout = QVBoxLayout(theme_column)
+        theme_layout.setContentsMargins(0, 0, 0, 0)
+        theme_layout.setSpacing(8)
+        theme_layout.addWidget(self._field_title("Theme"))
+
+        theme_tiles = QHBoxLayout()
+        theme_tiles.setContentsMargins(0, 0, 0, 0)
+        theme_tiles.setSpacing(16)
+        theme_group = QButtonGroup(self)
+        theme_group.setExclusive(True)
+        for name in ("Light", "Dark", "System"):
+            tile = SettingChoiceTile(name, ICON_DIR / f"theme-{name.lower()}.svg")
+            theme_tiles.addWidget(tile, 1)
+            self._track_ui_choice("theme", name, tile, theme_group)
+        theme_layout.addLayout(theme_tiles)
+        theme_layout.addStretch(1)
+        row.addWidget(theme_column, 1)
+        row.addWidget(self._vertical_divider(card.body))
+
+        language_column = QWidget(card.body)
+        language_column.setObjectName("settingsLanguageColumn")
+        language_layout = QVBoxLayout(language_column)
+        language_layout.setContentsMargins(0, 0, 0, 0)
+        language_layout.setSpacing(12)
+        language_layout.addWidget(self._field_title("Language"))
+        # Three equal columns, matching the Theme selector layout.
+        # Only two languages are supported; the third column is reserved.
+        language_grid = QGridLayout()
+        language_grid.setContentsMargins(0, 0, 0, 0)
+        language_grid.setHorizontalSpacing(16)
+        language_grid.setVerticalSpacing(0)
+        for column in range(3):
+            language_grid.setColumnStretch(column, 1)
+        language_group = QButtonGroup(self)
+        language_group.setExclusive(True)
+        for column, name in enumerate(("English", "Vietnamese")):
+            option = SettingRadioChoice(name, boxed=True)
+            language_grid.addWidget(option, 0, column)
+            self._track_ui_choice("language", name, option, language_group)
+        # Empty third cell is intentional; do not duplicate a language.
+        language_grid.addWidget(QWidget(language_column), 0, 2)
+        language_layout.addLayout(language_grid)
+        language_layout.addStretch(1)
+        row.addWidget(language_column, 1)
+        return card
+
+    # ----- Notifications -----
+    def _build_notifications(self) -> SectionCard:
+        card, body_layout = self._section_card(
+            "Notifications", "Manage task and system notifications.", 205
+        )
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(8)
+        body_layout.addLayout(content, 1)
+        rows = (
+            (
+                (
+                    "task_completed",
+                    "Task completed notification",
+                    "Notify when a task is finished successfully.",
+                ),
+                (
+                    "notification_sound",
+                    "Play notification sound",
+                    "Play a sound when there is a notification.",
+                ),
+            ),
+            (
+                (
+                    "task_failed",
+                    "Task failed notification",
+                    "Notify when a task fails.",
+                ),
+                (
+                    "desktop_notifications",
+                    "Desktop notifications",
+                    "Show desktop notifications.",
+                ),
+            ),
+        )
+        for pair in rows:
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            for name, title, description in pair:
+                line.addWidget(self._notification_item(name, title, description), 1)
+            content.addLayout(line)
+        return card
+
+    def _notification_item(self, key: str, title: str, description: str) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("settingsNotificationItem")
+        frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        frame.setStyleSheet(SETTING_NOTIFICATION_ITEM_STYLE)
+        frame.setFixedHeight(46)
+        row = QHBoxLayout(frame)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(5)
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(3)
+        label = QLabel(title)
+        label.setObjectName("settingsRowTitle")
+        label.setMinimumWidth(0)
+        description_label = QLabel(description)
+        description_label.setObjectName("settingsRowSubtitle")
+        description_label.setMinimumWidth(0)
+        copy.addWidget(label)
+        copy.addWidget(description_label)
+        row.addLayout(copy, 1)
+        toggle = ToggleSwitch()
+        self._track_ui_toggle(key, toggle)
+        row.addWidget(toggle)
+        return frame
+
+    # ----- Application Preferences -----
+    def _build_application_preferences(self) -> SectionCard:
+        card, body_layout = self._section_card(
+            "Application Preferences",
+            "Configure how the application works on your computer.",
+            205,
+        )
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(8)
+        body_layout.addLayout(content, 1)
+        preferences = (
+            (
+                "start_with_windows",
+                "Start with Windows",
+                "Launch the application when Windows starts.",
+            ),
+            (
+                "minimize_to_tray",
+                "Minimize to system tray",
+                "Minimize to system tray instead of taskbar.",
+            ),
+            (
+                "confirm_before_close",
+                "Confirm before closing",
+                "Show confirmation dialog when closing the app.",
+            ),
+        )
+        for name, title, description in preferences:
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            copy = QVBoxLayout()
+            copy.setContentsMargins(0, 0, 0, 0)
+            copy.setSpacing(2)
+            title_label = QLabel(title)
+            title_label.setObjectName("settingsRowTitle")
+            description_label = QLabel(description)
+            description_label.setObjectName("settingsPreferenceSubtitle")
+            copy.addWidget(title_label)
+            copy.addWidget(description_label)
+            line.addLayout(copy, 1)
+            toggle = ToggleSwitch()
+            self._track_ui_toggle(name, toggle)
+            line.addWidget(toggle)
+            content.addLayout(line)
+        return card
+
+    # ----- Custom Sidebar -----
+    def _build_custom_sidebar(self) -> SectionCard:
+        card, body_layout = self._section_card(
+            "Custom Sidebar",
+            "Customize sidebar layout and workspace navigation.",
+            279,
+        )
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(16)
+        body_layout.addLayout(row, 1)
+
+        sidebar_column = QWidget(card.body)
+        sidebar_column.setObjectName("settingsSidebarColumn")
+        sidebar_column.setMaximumWidth(388)
+        left = QVBoxLayout(sidebar_column)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(12)
+        left.addWidget(self._field_title("Sidebar Mode"))
+        choices = QHBoxLayout()
+        choices.setContentsMargins(0, 0, 0, 0)
+        choices.setSpacing(16)
+        sidebar_group = QButtonGroup(self)
+        sidebar_group.setExclusive(True)
+        for name, description in (
+            ("Expanded", "Show icons and labels"),
+            ("Compact", "Show icons only"),
+        ):
+            tile = SettingChoiceTile(
+                name,
+                ICON_DIR / f"sidebar-{name.lower()}.svg",
+                description=description,
+                tile_height=141,
+                preview_height=86,
+            )
+            choices.addWidget(tile, 1)
+            self._track_ui_choice("sidebar_mode", name, tile, sidebar_group)
+        left.addLayout(choices)
+        left.addStretch(1)
+        row.addWidget(sidebar_column, 4)
+        row.addWidget(self._vertical_divider(card.body))
+
+        split_column = QWidget(card.body)
+        split_column.setObjectName("settingsSplitColumn")
+        right = QVBoxLayout(split_column)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(12)
+        right.addWidget(self._field_title("Split Page (Workspace)"))
+        split_row = QHBoxLayout()
+        split_row.setContentsMargins(0, 0, 0, 0)
+        split_row.setSpacing(16)
+
+        split_options = QVBoxLayout()
+        split_options.setContentsMargins(0, 0, 0, 0)
+        split_options.setSpacing(13)
+        split_options.addStretch(1)
+        split_group = QButtonGroup(self)
+        split_group.setExclusive(True)
+        for key, title in (
+            ("off", "Off – Single page"),
+            ("vertical", "Vertical split – Left / Right"),
+            ("horizontal", "Horizontal split – Top / Bottom"),
+        ):
+            option = SettingRadioChoice(title)
+            split_options.addWidget(option)
+            self._track_ui_choice("split_page", key, option, split_group)
+        split_options.addStretch(1)
+        split_row.addLayout(split_options, 1)
+        split_row.addWidget(
+            SettingWorkspacePreview(ICON_DIR / "home-module-selector.svg")
+        )
+        right.addLayout(split_row)
+        right.addStretch(1)
+        row.addWidget(split_column, 7)
+        return card
 
     # ----- Path Field -----
     def _create_path_field(self, text: str) -> QWidget:
@@ -639,10 +1012,18 @@ class SettingPage(QWidget):
             "adspower/auto_reconnect",
             bool(auto_reconnect),
         )
+        current_ui = self._current_ui_preferences()
+        for name, value in current_ui.items():
+            self.settings.setValue(f"settings_ui/{name}", value)
         self.settings.sync()
+
+        if self.settings.status() != QSettings.Status.NoError:
+            self.notifications.error("Settings", "Unable to save changes.", 5000)
+            return
 
         self._saved_api_key = api_key
         self._saved_auto_reconnect = bool(auto_reconnect)
+        self._saved_ui_preferences = current_ui
 
         self._apply_auto_reconnect_setting(run_immediately=True)
         self.update_actions()
@@ -655,6 +1036,7 @@ class SettingPage(QWidget):
         return (
             current_api_key != self._saved_api_key
             or current_auto_reconnect != self._saved_auto_reconnect
+            or self._current_ui_preferences() != self._saved_ui_preferences
         )
 
     def _update_unsaved_state(self):
@@ -704,7 +1086,7 @@ class SettingPage(QWidget):
 
         self.connect_button.set_disabled(is_running or not has_api_key)
 
-        self.set_default_button.set_disabled(True)
+        self.set_default_button.set_disabled(is_running)
 
         self._update_unsaved_state()
 
@@ -718,6 +1100,7 @@ class SettingPage(QWidget):
 
         self.status_label.setText(states[state])
         self.status_label.setProperty("state", state)
+        self.status_label.setStyleSheet(CONNECTION_STATUS_STYLES[state])
 
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
