@@ -1,4 +1,30 @@
 from pathlib import Path
 
-# ----- Download Directory -----
-DOWNLOAD_DIR = Path.home() / "Downloads"
+from PySide6.QtCore import QStandardPaths
+
+# ----- Root -----
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
+
+# ----- Data -----
+DATA_DIR = ROOT_DIR / "data"
+DEVLOG_DIR = DATA_DIR / "devlogs"
+RESULT_DIR = DATA_DIR / "results"
+MEDIA_DIR = DATA_DIR / "media"
+DATA_FILE = DATA_DIR / "databook.xlsx"
+
+
+# ----- Downloads -----
+_download_dir = QStandardPaths.writableLocation(
+    QStandardPaths.StandardLocation.DownloadLocation
+)
+DOWNLOAD_DIR = Path(_download_dir) if _download_dir else Path.home() / "Downloads"
+
+
+# ----- Directories -----
+def ensure_app_dirs():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DEVLOG_DIR.mkdir(parents=True, exist_ok=True)
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)

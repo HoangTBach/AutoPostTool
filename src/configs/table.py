@@ -23,16 +23,16 @@ PAGE_TABLE_COLUMNS = [
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
         "type": "input",
-        "editable": False,
+        "mode": "locked",
     },
     {
-        "key": "image",
-        "title": "Image",
+        "key": "media",
+        "title": "Media",
         "resize": "stretch",
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
         "type": "input",
-        "editable": False,
+        "mode": "locked",
     },
     {
         "key": "comment",
@@ -41,7 +41,7 @@ PAGE_TABLE_COLUMNS = [
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
         "type": "input",
-        "editable": False,
+        "mode": "read_only_copy",
     },
     {
         "key": "status",
@@ -59,7 +59,14 @@ GROUP_TABLE_COLUMNS = [
     {
         "key": "no",
         "title": "No",
-        "width": 36,
+        "width": 50,
+        "resize": "fixed",
+        "align": Qt.AlignmentFlag.AlignLeft,
+    },
+    {
+        "key": "group",
+        "title": "Group",
+        "width": 190,
         "resize": "fixed",
         "align": Qt.AlignmentFlag.AlignLeft,
     },
@@ -69,15 +76,17 @@ GROUP_TABLE_COLUMNS = [
         "resize": "stretch",
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "box",
+        "type": "input",
+        "mode": "locked",
     },
     {
         "key": "image",
-        "title": "Image / Link",
+        "title": "Image",
         "resize": "stretch",
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "box",
+        "type": "input",
+        "mode": "locked",
     },
     {
         "key": "comment",
@@ -85,60 +94,19 @@ GROUP_TABLE_COLUMNS = [
         "resize": "stretch",
         "stretch": 2,
         "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "box",
-    },
-    {
-        "source": "targets",
-        "field": "name",
-        "title": "Group targets",
-        "resize": "stretch",
-        "stretch": 2,
-        "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "list",
-    },
-    {
-        "source": "targets",
-        "field": "status",
-        "title": "Status",
-        "width": 80,
-        "resize": "fixed",
-        "align": Qt.AlignmentFlag.AlignRight,
-        "type": "status_list",
-    },
-]
-
-
-# ----- News Auto -----
-NEWS_TABLE_COLUMNS = [
-    {
-        "key": "no",
-        "title": "No",
-        "width": 36,
-        "resize": "fixed",
-        "align": Qt.AlignmentFlag.AlignLeft,
-    },
-    {
-        "key": "caption",
-        "title": "Caption",
-        "resize": "stretch",
-        "stretch": 3,
-        "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "box",
-    },
-    {
-        "key": "image",
-        "title": "Image / Link",
-        "resize": "stretch",
-        "stretch": 2,
-        "align": Qt.AlignmentFlag.AlignLeft,
-        "type": "box",
+        "type": "input",
+        "mode": "read_only_copy",
     },
     {
         "key": "status",
         "title": "Status",
-        "width": 80,
+        "width": 90,
         "resize": "fixed",
         "align": Qt.AlignmentFlag.AlignRight,
         "type": "status",
     },
 ]
+
+
+# ----- News Auto -----
+NEWS_TABLE_COLUMNS = []

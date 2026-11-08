@@ -70,8 +70,6 @@ QWidget#tableCardBody {{
     border: none;
 }}
 """
-<<<<<<< Updated upstream
-=======
 
 
 # ----- Section Card -----
@@ -123,4 +121,3 @@ QLabel#scrollableCardDescription {{
     font-weight: {FONTS["weight"]["regular"]};
 }}
 """
->>>>>>> Stashed changes

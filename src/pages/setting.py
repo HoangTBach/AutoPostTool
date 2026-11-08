@@ -38,10 +38,7 @@ from src.styles.setting_style import (
     SETTING_SECTIONS_STYLE,
     SETTING_STYLE,
     CARD_BORDER,
-<<<<<<< Updated upstream
-=======
     CONNECTION_STATUS_STYLES,
->>>>>>> Stashed changes
 )
 from src.themes.spacing import SPACING as SPACE
 from src.utils.cmd_log import cmd_log
@@ -165,14 +162,11 @@ class SettingPage(QWidget):
         self.status_label.setObjectName("connectionStatus")
         self.status_label.setProperty("state", "disconnected")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-<<<<<<< Updated upstream
-=======
         self.status_label.setSizePolicy(
             QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
         self.status_label.setMinimumHeight(23)
         self.status_label.setStyleSheet(CONNECTION_STATUS_STYLES["disconnected"])
->>>>>>> Stashed changes
         adspower_card.header_layout.addWidget(
             self.status_label, 0, Qt.AlignmentFlag.AlignVCenter
         )

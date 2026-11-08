@@ -1,13 +1,5 @@
-<<<<<<< Updated upstream
-from PySide6.QtCore import (
-    QEasingCurve,
-    QPropertyAnimation,
-    Qt,
-)
-=======
 from urllib.parse import unquote, urlsplit
 from PySide6.QtCore import Qt
->>>>>>> Stashed changes
 from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
@@ -18,27 +10,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-<<<<<<< Updated upstream
-from src.components.input import Input
-=======
 from src.components.input import Input, InputMode
 from src.components.smooth_scroll_area import SmoothScrollArea
->>>>>>> Stashed changes
 from src.styles.table_style import TABLE_STYLE
 from src.themes.spacing import SPACING as SPACE
 
 
 class ElideLabel(QLabel):
 
-    def __init__(
-        self,
-        text: str = "",
-    ):
+    def __init__(self, text: str = ""):
         super().__init__(text)
 
         self.full_text = text
 
-        # ----- Allow Text Elide -----
         self.setMinimumWidth(0)
 
         self.setSizePolicy(
@@ -48,12 +32,18 @@ class ElideLabel(QLabel):
 
     # ----- Elide Text -----
     def resizeEvent(self, event):
-        available_width = self.contentsRect().width()
+        width = self.contentsRect().width()
+        metrics = self.fontMetrics()
 
-        text = self.fontMetrics().elidedText(
-            self.full_text,
-            Qt.TextElideMode.ElideRight,
-            available_width,
+        lines = self.full_text.splitlines()
+
+        text = "\n".join(
+            metrics.elidedText(
+                line,
+                Qt.TextElideMode.ElideRight,
+                width,
+            )
+            for line in lines
         )
 
         super().setText(text)
@@ -177,14 +167,28 @@ class Table(QWidget):
             self.header_layout.addWidget(label, 0, index)
 
     # ----- Set Data -----
-    def set_data(
-        self,
-        rows: list[dict],
-    ):
-        self.clear_rows()
+    def set_data(self, rows: list[dict]):
+        self.setUpdatesEnabled(False)
+        self.body.setUpdatesEnabled(False)
+        self.scroll_area.viewport().setUpdatesEnabled(False)
 
-        for row in rows:
-            self.body_layout.addWidget(self.create_row(row))
+        try:
+            self.clear_rows()
+
+            row_widgets = [self.create_row(row) for row in rows]
+
+            for widget in row_widgets:
+                self.body_layout.addWidget(widget)
+
+        finally:
+            self.body_layout.invalidate()
+            self.body_layout.activate()
+
+            self.body.setUpdatesEnabled(True)
+            self.scroll_area.viewport().setUpdatesEnabled(True)
+            self.setUpdatesEnabled(True)
+
+            self.update()
 
     # ----- Clear Rows -----
     def clear_rows(self):
@@ -261,12 +265,25 @@ class Table(QWidget):
 
     # ----- Input -----
     def create_input(self, text: str, column: dict):
-        input_field = Input(
+        configured_mode = column.get("mode")
+
+        if configured_mode is not None:
+            mode = InputMode(configured_mode)
+
+        elif "editable" in column:
+            mode = InputMode.NORMAL if column["editable"] else InputMode.LOCKED
+
+        else:
+            mode = InputMode.NORMAL
+
+        input_widget = Input(
             text=text,
-            editable=column.get("editable", False),
+            mode=mode,
         )
 
-        return input_field
+        input_widget.setAlignment(self.get_alignment(column))
+
+        return input_widget
 
     # ----- Status -----
     def create_status(self, status: str, column: dict):
@@ -348,12 +365,25 @@ class Table(QWidget):
 
         if source:
             values = row.get(source, [])
-
             field = column.get("field")
-
             return [item.get(field, "") for item in values]
 
-        return row.get(column.get("key"), "")
+        key = column.get("key")
+        value = row.get(key, "")
+
+        if column.get("display_filename") and value:
+            original_value = str(value).strip().strip("\"'")
+
+            if original_value.lower().startswith(("http://", "https://")):
+                original_value = unquote(urlsplit(original_value).path)
+
+            display_value = (
+                original_value.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+            )
+
+            return display_value or str(value)
+
+        return value
 
     # ----- Row Height -----
     def get_row_height(self, row: dict):

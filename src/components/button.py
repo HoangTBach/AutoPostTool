@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QLayout,
     QPushButton,
     QSizePolicy,
+    QGraphicsOpacityEffect,
 )
 
 from src.styles.button_style import (
@@ -23,10 +24,8 @@ TRANSPARENT = COLORS["transparent"]
 
 
 class ButtonIcon(QLabel):
-
     def __init__(self):
         super().__init__()
-
         self.icon_pixmap = QPixmap()
 
     def set_icon_pixmap(self, pixmap: QPixmap):
@@ -46,7 +45,6 @@ class ButtonIcon(QLabel):
 
 
 class Button(QPushButton):
-
     # ----- Settings -----
     ICON_SIZE = 16
     SPACING = SPACE[8]
@@ -64,8 +62,13 @@ class Button(QPushButton):
         variant: str = "outline",
         color: str = "blue",
         parent=None,
+        *,
+        disabled: bool = False,
     ):
         super().__init__(parent)
+
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity_effect)
 
         # ----- Data -----
         self.variant = variant
@@ -85,31 +88,26 @@ class Button(QPushButton):
 
         # ----- Icon -----
         self.icon_label = ButtonIcon()
-
         self.icon_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
 
         if self.icon_path:
             self.icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
-
             self.render_icon(self.get_content_color())
-
         else:
             self.icon_label.hide()
 
         # ----- Text -----
         self.text_label = QLabel(text)
         self.text_label.setObjectName("buttonText")
-
         self.text_label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
         )
-
         self.text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         self.text_label.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
         )
 
         self.set_text_color(self.get_content_color())
@@ -118,7 +116,6 @@ class Button(QPushButton):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(*self.MARGIN)
         layout.setSpacing(self.SPACING if self.icon_path else 0)
-
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         if self.icon_path:
@@ -128,24 +125,77 @@ class Button(QPushButton):
 
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
 
-    # ----- Content Color -----
-    def get_content_color(self):
-        if self.variant == "primary":
-            return BUTTON_WHITE
+        self.set_disabled(disabled)
 
-        return BUTTON_COLORS[self.color]["base"]
+    # ----- Enable / Disable -----
+    def set_disabled(self, disabled: bool = True) -> None:
+        disabled = bool(disabled)
+
+        self.setEnabled(not disabled)
+
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            disabled,
+        )
+
+        self.setCursor(
+            Qt.CursorShape.ArrowCursor
+            if disabled
+            else Qt.CursorShape.PointingHandCursor
+        )
+
+        if hasattr(self, "_opacity_effect"):
+            self._opacity_effect.setOpacity(0.45 if disabled else 1.0)
+
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def _refresh_content_style(self) -> None:
+        color = self.get_content_color()
+        self.set_text_color(color)
+        self.render_icon(color)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+
+        if event.type() == QEvent.Type.EnabledChange and hasattr(self, "text_label"):
+            self._refresh_content_style()
+
+    # ----- Content Color -----
+    def get_content_color(self) -> QColor:
+        if self.variant == "primary":
+            base_color = BUTTON_WHITE
+        else:
+            base_color = BUTTON_COLORS[self.color]["base"]
+
+        color = QColor(base_color)
+
+        if not self.isEnabled():
+            color.setAlpha(120)
+
+        return color
 
     # ----- Text Color -----
-    def set_text_color(self, color: str):
+    def set_text_color(self, color: QColor | str) -> None:
+        color = QColor(color)
+
+        rgba_color = (
+            f"rgba({color.red()}, "
+            f"{color.green()}, "
+            f"{color.blue()}, "
+            f"{color.alpha()})"
+        )
+
         self.text_label.setStyleSheet(f"""
-            color: {color};
+            color: {rgba_color};
             background-color: {TRANSPARENT};
             border: none;
             """)
 
     # ----- Render Icon -----
-    def render_icon(self, color: str):
-        if not self.icon_path:
+    def render_icon(self, color: QColor | str) -> None:
+        if not self.icon_path or not hasattr(self, "icon_label"):
             return
 
         renderer = QSvgRenderer(str(self.icon_path))
@@ -154,17 +204,18 @@ class Button(QPushButton):
             return
 
         pixmap = QPixmap(self.ICON_SIZE, self.ICON_SIZE)
-
         pixmap.fill(QColor(TRANSPARENT))
 
         painter = QPainter(pixmap)
+        renderer.render(
+            painter,
+            QRectF(0, 0, self.ICON_SIZE, self.ICON_SIZE),
+        )
 
-        renderer.render(painter, QRectF(0, 0, self.ICON_SIZE, self.ICON_SIZE))
-
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-
+        painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_SourceIn,
+        )
         painter.fillRect(pixmap.rect(), QColor(color))
-
         painter.end()
 
         self.icon_label.set_icon_pixmap(pixmap)

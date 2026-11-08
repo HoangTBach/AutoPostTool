@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from PySide6.QtCore import (
+    QEvent,
     QRectF,
+    QTimer,
     Qt,
 )
 from PySide6.QtGui import (
@@ -13,17 +15,11 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-<<<<<<< Updated upstream
-=======
     QFrame,
->>>>>>> Stashed changes
     QVBoxLayout,
     QWidget,
 )
 
-<<<<<<< Updated upstream
-from src.styles.card_style import CARD_STYLE, STAT_COLORS
-=======
 from src.components.smooth_scroll_area import SmoothScrollArea
 from src.styles.card_style import (
     CARD_BG,
@@ -33,7 +29,6 @@ from src.styles.card_style import (
     SECTION_CARD_STYLE,
     STAT_COLORS,
 )
->>>>>>> Stashed changes
 from src.themes.color import COLORS
 from src.themes.radius import RADIUS
 from src.themes.spacing import SPACING as SPACE
@@ -42,10 +37,6 @@ TRANSPARENT = COLORS["transparent"]
 
 
 class Card(QWidget):
-<<<<<<< Updated upstream
-
-    def __init__(self):
-=======
 
     # ----- Settings -----
     OVERLAY_COLOR = "rgba(15, 23, 42, 40)"
@@ -70,19 +61,109 @@ class Card(QWidget):
     }
 
     def __init__(self, disabled: bool = False):
->>>>>>> Stashed changes
         super().__init__()
 
         # ----- Card -----
         self.setObjectName("card")
-
-        # ----- Styled Background -----
         self.setAttribute(
             Qt.WidgetAttribute.WA_StyledBackground,
             True,
         )
-
         self.setStyleSheet(CARD_STYLE)
+
+        # ----- Disabled Overlay -----
+        self._disabled = False
+
+        self._overlay = QWidget(self)
+        self._overlay.setObjectName("cardDisabledOverlay")
+        self._overlay.setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
+        self._overlay.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus,
+        )
+        self._overlay.setStyleSheet(f"""
+            QWidget#cardDisabledOverlay {{
+                background-color: {self.OVERLAY_COLOR};
+                border: none;
+                border-radius: {RADIUS["card"]}px;
+            }}
+        """)
+        self._overlay.hide()
+        self._overlay.installEventFilter(self)
+
+        self.installEventFilter(self)
+
+        self.set_disabled(disabled)
+
+    # ----- Disabled State -----
+    def set_disabled(self, disabled: bool) -> None:
+        disabled = bool(disabled)
+
+        if self._disabled == disabled:
+            return
+
+        self._disabled = disabled
+
+        for widget in self.findChildren(QWidget):
+            if widget is self._overlay:
+                continue
+
+            if disabled:
+                widget.installEventFilter(self)
+                widget.clearFocus()
+            else:
+                widget.removeEventFilter(self)
+
+        self._overlay.setVisible(disabled)
+        self._update_overlay()
+
+        if disabled:
+            self._overlay.setFocus(
+                Qt.FocusReason.OtherFocusReason,
+            )
+
+    # ----- Overlay Geometry -----
+    def _update_overlay(self) -> None:
+        self._overlay.setGeometry(
+            self.rect().adjusted(1, 1, -1, -1),
+        )
+
+        if self._disabled:
+            self._overlay.raise_()
+
+    # ----- Resize -----
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_overlay()
+
+    # ----- Show -----
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_overlay()
+
+    # ----- Interaction -----
+    def eventFilter(self, watched, event) -> bool:
+        if self._disabled and event.type() == QEvent.Type.ChildAdded:
+            child = event.child()
+
+            if isinstance(child, QWidget):
+                child.installEventFilter(self)
+
+                for widget in child.findChildren(QWidget):
+                    widget.installEventFilter(self)
+
+                QTimer.singleShot(0, self._update_overlay)
+
+        if (
+            self._disabled
+            and watched is not self
+            and event.type() in self.BLOCKED_EVENTS
+        ):
+            return True
+
+        return False
 
 
 class StatCard(Card):
@@ -102,18 +183,16 @@ class StatCard(Card):
         description: str,
         icon: Path,
         color: str = "blue",
+        disabled: bool = False,
     ):
-        super().__init__()
+        super().__init__(disabled=disabled)
 
         stat_color = STAT_COLORS[color]
 
         # ----- Icon -----
         self.icon_box = QLabel()
 
-        self.icon_box.setFixedSize(
-            self.ICON_BOX_SIZE,
-            self.ICON_BOX_SIZE,
-        )
+        self.icon_box.setFixedSize(self.ICON_BOX_SIZE, self.ICON_BOX_SIZE)
 
         self.icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -122,11 +201,7 @@ class StatCard(Card):
             border-radius: {RADIUS["icon"]}px;
             """)
 
-        self.set_svg_icon(
-            self.icon_box,
-            icon,
-            stat_color["base"],
-        )
+        self.set_svg_icon(self.icon_box, icon, stat_color["base"])
 
         # ----- Title -----
         self.title_label = QLabel(title)
@@ -142,12 +217,7 @@ class StatCard(Card):
 
         # ----- Text Layout -----
         text_layout = QVBoxLayout()
-        text_layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(self.TEXT_SPACING)
 
         text_layout.addWidget(self.title_label)
@@ -159,11 +229,7 @@ class StatCard(Card):
         layout.setContentsMargins(*self.MARGIN)
         layout.setSpacing(self.SPACING)
 
-        layout.addWidget(
-            self.icon_box,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
+        layout.addWidget(self.icon_box, 0, Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(text_layout)
 
@@ -188,32 +254,39 @@ class StatCard(Card):
 
         pixmap.fill(QColor(TRANSPARENT))
 
-        painter = QPainter(pixmap)
+        painter = QPainter()
 
-        renderer.render(
-            painter,
-            QRectF(
-                0,
-                0,
-                self.ICON_SIZE,
-                self.ICON_SIZE,
-            ),
-        )
+        if not painter.begin(pixmap):
+            return
 
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        try:
+            renderer.render(
+                painter,
+                QRectF(
+                    0,
+                    0,
+                    self.ICON_SIZE,
+                    self.ICON_SIZE,
+                ),
+            )
 
-        painter.fillRect(
-            pixmap.rect(),
-            QColor(color),
-        )
+            painter.setCompositionMode(
+                QPainter.CompositionMode.CompositionMode_SourceIn,
+            )
 
-        painter.end()
+            painter.fillRect(
+                pixmap.rect(),
+                QColor(color),
+            )
+
+        finally:
+            if painter.isActive():
+                painter.end()
 
         label.setPixmap(pixmap)
 
 
 class TableCard(Card):
-
     # ----- Settings -----
     HEADER_MARGIN = (
         SPACE[24],
@@ -227,8 +300,9 @@ class TableCard(Card):
     def __init__(
         self,
         title: str,
+        disabled: bool = False,
     ):
-        super().__init__()
+        super().__init__(disabled=disabled)
 
         self.table = None
 
@@ -261,27 +335,16 @@ class TableCard(Card):
         # ----- Card Layout -----
         layout = QVBoxLayout(self)
 
-        layout.setContentsMargins(
-            0,
-            0,
-            0,
-            0,
-        )
+        layout.setContentsMargins(0, 0, 0, 0)
 
         layout.setSpacing(self.SPACING)
 
         layout.addWidget(self.header)
 
-        layout.addWidget(
-            self.body,
-            1,
-        )
+        layout.addWidget(self.body, 1)
 
     # ----- Set Table -----
-    def set_table(
-        self,
-        table: QWidget,
-    ):
+    def set_table(self, table: QWidget):
         if self.table is not None:
             self.body_layout.removeWidget(self.table)
 
@@ -289,11 +352,6 @@ class TableCard(Card):
 
         self.table = table
 
-<<<<<<< Updated upstream
-        self.body_layout.addWidget(
-            self.table,
-            1,
-=======
         self.body_layout.addWidget(self.table, 1)
 
 
@@ -438,5 +496,4 @@ class ScrollableCard(SectionCard):
             title_object_name="scrollableCardTitle",
             description_object_name="scrollableCardDescription",
             disabled=disabled,
->>>>>>> Stashed changes
         )

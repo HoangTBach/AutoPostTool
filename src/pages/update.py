@@ -28,7 +28,7 @@ from src.styles.update_style import (
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
-# ----- Detailed Update Notes -----
+# ----- Detailed Update Notes: Figma sample data -----
 UPDATE_NOTES = (
     (
         "UI IMPROVEMENTS",
@@ -59,11 +59,11 @@ UPDATE_NOTES = (
     ),
 )
 
-# ----- Update History -----
+# ----- Update History: Figma sample data -----
 UPDATE_HISTORY = (
     (
         "v1",
-        "v1.0.0",
+        "v1.0.1",
         "Sep 12, 2026",
         "Fix",
         "blue",
@@ -71,6 +71,42 @@ UPDATE_HISTORY = (
             "Improved sync after successful posting.",
             "Fixed time display in the update history.",
             "Optimized version details for smaller screens.",
+        ),
+    ),
+    (
+        "v1",
+        "v1.0.0",
+        "Aug 26, 2026",
+        "Stable",
+        "blue",
+        (
+            "Launched the official Update page.",
+            "Added update history with release notes for each version.",
+            "Improved version status and install date display.",
+        ),
+    ),
+    (
+        "v0",
+        "v0.9.8",
+        "Aug 02, 2026",
+        "Fix",
+        "green",
+        (
+            "Fixed queue status loss after app restart.",
+            "Improved data sync after updating to a new version.",
+            "Optimized performance when reviewing update history.",
+        ),
+    ),
+    (
+        "v0",
+        "v0.9.5",
+        "Jul 15, 2026",
+        "Fix",
+        "green",
+        (
+            "Improved version and update date display.",
+            "Fixed inaccurate display in some history items.",
+            "Optimized the experience for viewing release details.",
         ),
     ),
 )
