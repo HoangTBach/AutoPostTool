@@ -1129,7 +1129,7 @@ class PageAutoPage(QWidget):
 
         self.notifications.success(
             "Preflight Successful",
-            f"{message} Starting Page link test. No posts will be published.",
+            f"{message} Starting Facebook Page posting workflow.",
             5000,
         )
 
