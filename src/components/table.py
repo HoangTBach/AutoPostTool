@@ -1,8 +1,13 @@
+<<<<<<< Updated upstream
 from PySide6.QtCore import (
     QEasingCurve,
     QPropertyAnimation,
     Qt,
 )
+=======
+from urllib.parse import unquote, urlsplit
+from PySide6.QtCore import Qt
+>>>>>>> Stashed changes
 from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
@@ -13,7 +18,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+<<<<<<< Updated upstream
 from src.components.input import Input
+=======
+from src.components.input import Input, InputMode
+from src.components.smooth_scroll_area import SmoothScrollArea
+>>>>>>> Stashed changes
 from src.styles.table_style import TABLE_STYLE
 from src.themes.spacing import SPACING as SPACE
 
@@ -48,65 +58,6 @@ class ElideLabel(QLabel):
 
         super().setText(text)
         super().resizeEvent(event)
-
-
-class SmoothScrollArea(QScrollArea):
-
-    # ----- Settings -----
-    DURATION = 180
-    SCROLL_STEP = 120
-
-    def __init__(self):
-        super().__init__()
-
-        self.animation = QPropertyAnimation(
-            self.verticalScrollBar(),
-            b"value",
-            self,
-        )
-
-        self.animation.setDuration(self.DURATION)
-
-        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-    # ----- Smooth Wheel Scroll -----
-    def wheelEvent(self, event):
-        scrollbar = self.verticalScrollBar()
-
-        delta = event.angleDelta().y()
-
-        if delta == 0:
-            super().wheelEvent(event)
-            return
-
-        # ----- Current Target -----
-        if self.animation.state() == QPropertyAnimation.State.Running:
-            start_value = self.animation.endValue()
-        else:
-            start_value = scrollbar.value()
-
-        steps = delta / 120
-
-        target = int(start_value - steps * self.SCROLL_STEP)
-
-        target = max(
-            scrollbar.minimum(),
-            min(
-                target,
-                scrollbar.maximum(),
-            ),
-        )
-
-        # ----- Animation -----
-        self.animation.stop()
-
-        self.animation.setStartValue(scrollbar.value())
-
-        self.animation.setEndValue(target)
-
-        self.animation.start()
-
-        event.accept()
 
 
 class Table(QWidget):

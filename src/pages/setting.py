@@ -38,6 +38,10 @@ from src.styles.setting_style import (
     SETTING_SECTIONS_STYLE,
     SETTING_STYLE,
     CARD_BORDER,
+<<<<<<< Updated upstream
+=======
+    CONNECTION_STATUS_STYLES,
+>>>>>>> Stashed changes
 )
 from src.themes.spacing import SPACING as SPACE
 from src.utils.cmd_log import cmd_log
@@ -46,7 +50,6 @@ ICON_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 
 class SettingPage(QWidget):
-
     # ----- Settings -----
     MARGIN = (SPACE[32], SPACE[32], SPACE[32], SPACE[32])
     SPACING = SPACE["legacy"][20]
@@ -162,6 +165,14 @@ class SettingPage(QWidget):
         self.status_label.setObjectName("connectionStatus")
         self.status_label.setProperty("state", "disconnected")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+<<<<<<< Updated upstream
+=======
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+        self.status_label.setMinimumHeight(23)
+        self.status_label.setStyleSheet(CONNECTION_STATUS_STYLES["disconnected"])
+>>>>>>> Stashed changes
         adspower_card.header_layout.addWidget(
             self.status_label, 0, Qt.AlignmentFlag.AlignVCenter
         )
@@ -1095,6 +1106,7 @@ class SettingPage(QWidget):
 
         self.status_label.setText(states[state])
         self.status_label.setProperty("state", state)
+        self.status_label.setStyleSheet(CONNECTION_STATUS_STYLES[state])
 
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)

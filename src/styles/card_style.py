@@ -70,3 +70,57 @@ QWidget#tableCardBody {{
     border: none;
 }}
 """
+<<<<<<< Updated upstream
+=======
+
+
+# ----- Section Card -----
+SECTION_CARD_STYLE = f"""
+QWidget#sectionCardHeader,
+QWidget#sectionCardBody,
+QScrollArea#sectionCardScrollArea,
+QScrollArea#sectionCardScrollArea > QWidget,
+QScrollArea#sectionCardScrollArea > QWidget > QWidget {{
+    background: transparent;
+    border: none;
+}}
+QLabel#sectionCardTitle {{
+    color: {TEXT_COLOR};
+    background: transparent;
+    border: none;
+    font-size: {FONTS["size"][14]}px;
+    font-weight: {FONTS["weight"]["bold"]};
+}}
+QLabel#sectionCardDescription {{
+    color: {CARD_DESCRIPTION};
+    background: transparent;
+    border: none;
+    font-size: {FONTS["size"][12]}px;
+    font-weight: {FONTS["weight"]["regular"]};
+}}
+QFrame#sectionCardHeaderDivider {{
+    background-color: {CARD_BORDER};
+    border: none;
+    min-height: 1px;
+    max-height: 1px;
+}}
+"""
+
+# ----- Scrollable Card -----
+SCROLLABLE_CARD_STYLE = f"""
+QLabel#scrollableCardTitle {{
+    background: transparent;
+    border: none;
+    color: {TEXT_COLOR};
+    font-size: {FONTS["size"][18]}px;
+    font-weight: {FONTS["weight"]["bold"]};
+}}
+QLabel#scrollableCardDescription {{
+    background: transparent;
+    border: none;
+    color: {CARD_TITLE};
+    font-size: {FONTS["size"][13]}px;
+    font-weight: {FONTS["weight"]["regular"]};
+}}
+"""
+>>>>>>> Stashed changes
